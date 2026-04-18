@@ -1,0 +1,6 @@
+{
+  "name": "Img2XL",
+  "description": "Convert images of receipts, tables, and documents into downloadable Excel files using AI-powered OCR.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
