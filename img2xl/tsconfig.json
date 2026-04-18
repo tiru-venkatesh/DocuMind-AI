@@ -1,16 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
+    "module": "ESNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "outDir": "dist",
-    "rootDir": ".",
-    "esModuleInterop": true,
     "skipLibCheck": true,
-    "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "allowJs": true,
+    "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["vite/client"]
-  }
+    "types": ["vite/client"],
+    "noEmit": true
+  },
+  "include": ["src"]
 }
