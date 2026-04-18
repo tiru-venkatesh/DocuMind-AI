@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
+import { createServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
@@ -113,7 +113,7 @@ const response = await client.chat.completions.create({
 
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    const vite = await createServer({
       server: { 
         middlewareMode: true,
         hmr: process.env.DISABLE_HMR !== 'true'
