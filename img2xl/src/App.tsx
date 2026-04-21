@@ -1,734 +1,1046 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * Img2XL — Convert Images to Excel Instantly
+ * Built by Himesh & Tiru | Powered by Gemini AI + Firebase
+ * Theme: Premium Black & Gold
+ * @license Apache-2.0
  */
 
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Upload, FileSpreadsheet, Trash2, Loader2, Download, AlertCircle, 
-  Image as ImageIcon, CheckCircle2, Table as TableIcon, Sparkles,
-  RefreshCw, Files, ArrowRight, ChevronRight, X, FileText, Package,
-  ShieldCheck, Zap, Globe, Database, Workflow, ClipboardList, Layers,
-  Cpu, FileDown, Settings2, Plus, ChevronDown, BarChart3, Activity,
-  Eye, Lock, Columns as ColumnsIcon, Rows as RowsIcon
+import React, {
+  useState, useRef, useEffect, useContext, createContext, useMemo,
+} from 'react';
+import {
+  Upload, FileSpreadsheet, Trash2, Loader2, Download, AlertCircle,
+  CheckCircle2, Table as TableIcon, Sparkles, RefreshCw, X,
+  Plus, Edit2, Columns as ColumnsIcon, LogOut, History,
+  User, Github, Mail, Lock, Eye, EyeOff, ChevronDown,
+  ShieldCheck, Zap, MessageSquare, Info, CreditCard,
+  Menu, Send, UserCircle2, FileDown, Copy,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import JSZip from 'jszip';
-import ReactMarkdown from 'react-markdown';
-import { extractTableFromImage, ExtractionOptions } from './lib/imageExtraction';
-import { optimizeImage } from './lib/optimization';
-import { splitPdfIntoChunks, generateWatermarkedPdf, WatermarkOptions } from './lib/pdfUtils';
-import { cn } from './lib/utils';
+import * as XLSX from 'xlsx';
+// AI calls go through /api/extract and /api/chat on the server
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+  createUserWithEmailAndPassword, signOut, GoogleAuthProvider,
+  signInWithPopup, updateProfile, updatePassword, deleteUser,
+  User as FirebaseUser,
+} from 'firebase/auth';
+import {
+  getFirestore, collection, addDoc, query, where, getDocs,
+  deleteDoc, doc, orderBy, serverTimestamp, setDoc, getDoc,
+  Timestamp,
+} from 'firebase/firestore';
+const firebaseConfig = {
+  apiKey: "AIzaSyCDKY9B4j4HMt39LhwgujNZTM0NNX-l-ts",
+  authDomain: "my-project-1436-1754940582084.firebaseapp.com",
+  projectId: "my-project-1436-1754940582084",
+  storageBucket: "my-project-1436-1754940582084.firebasestorage.app",
+  messagingSenderId: "917682303442",
+  appId: "1:917682303442:web:9dd8a887a1f203458e180b"
+};
+// ─── Firebase & Gemini ────────────────────────────────────────────────────────
+const firebaseApp = initializeApp(firebaseConfig);
+const auth        = getAuth(firebaseApp);
+const db          = getFirestore(firebaseApp);
 
-interface FileItem {
-  id: string;
-  file: File;
-  preview: string | null;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  progress: number;
-  statusMessage: string;
-  extractedData: any[] | null;
-  error?: string;
-}
 
-export default function App() {
-  const [items, setItems] = useState<FileItem[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [isProcessingAll, setIsProcessingAll] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [options, setOptions] = useState<ExtractionOptions>({ detectMultipleTables: false, autoCleanData: true });
-  const [filters, setFilters] = useState<Record<string, string>>({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 50;
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant', content: string, timestamp: string }[]>(() => {
-    const saved = localStorage.getItem('img2xl_chat_history');
-    if (!saved) return [];
-    try { return JSON.parse(saved).map((m: any) => ({ ...m, timestamp: m.timestamp || new Date().toISOString() })); }
-    catch { return []; }
-  });
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
-  const [watermark] = useState<WatermarkOptions>({ text: 'CONFIDENTIAL', opacity: 0.3, size: 45, rotation: 45, color: { r: 150, g: 150, b: 150 } });
+// ─── Design Tokens ───────────────────────────────────────────────────────────
+const G = {
+  bg:        '#0a0a0a',
+  bgCard:    '#111111',
+  bgCard2:   '#161616',
+  border:    '#222222',
+  gold:      '#C9A84C',
+  goldLight: '#E2C97E',
+  goldDark:  '#8B6914',
+  white:     '#FFFFFF',
+  gray:      '#888888',
+  grayDim:   '#444444',
+  success:   '#4ADE80',
+  error:     '#F87171',
+  info:      '#60A5FA',
+};
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const activeItem = items.find(item => item.id === activeId);
+// ─── Global CSS injected once ────────────────────────────────────────────────
+const GLOBAL_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:${G.bg};color:${G.white};font-family:'DM Sans',sans-serif;overflow-x:hidden}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:${G.bg}}
+::-webkit-scrollbar-thumb{background:${G.goldDark};border-radius:2px}
+::selection{background:${G.gold}33;color:${G.goldLight}}
 
-  const getFilteredData = (data: any[]) => {
-    if (!data) return [];
-    return data.filter(row => Object.entries(filters).every(([key, value]) => {
-      if (!value) return true;
-      return String(row[key] || '').toLowerCase().includes(String(value).toLowerCase());
-    }));
-  };
+.fd{font-family:'Playfair Display',serif}
+.fm{font-family:'JetBrains Mono',monospace}
 
-  const handleFilterChange = (column: string, value: string) => {
-    setFilters(prev => ({ ...prev, [column]: value }));
-    setCurrentPage(1);
-  };
+.gold-text{background:linear-gradient(135deg,${G.gold},${G.goldLight},${G.gold});-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || isChatLoading) return;
-    const userMsg = { role: 'user' as const, content: chatInput, timestamp: new Date().toISOString() };
-    setChatMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-    setIsChatLoading(true);
+.btn-gold{background:linear-gradient(135deg,${G.gold},${G.goldLight});color:#000;font-weight:700;font-family:'DM Sans',sans-serif;letter-spacing:.08em;text-transform:uppercase;font-size:11px;border:none;cursor:pointer;transition:all .2s;border-radius:8px;display:inline-flex;align-items:center;gap:8px}
+.btn-gold:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 8px 24px ${G.gold}33}
+.btn-gold:active{transform:translateY(0)}
+.btn-gold:disabled{opacity:.5;pointer-events:none}
+
+.btn-ghost{background:transparent;color:${G.gray};border:1px solid ${G.border};font-weight:600;font-family:'DM Sans',sans-serif;letter-spacing:.06em;text-transform:uppercase;font-size:11px;cursor:pointer;transition:all .2s;border-radius:8px;display:inline-flex;align-items:center;gap:8px}
+.btn-ghost:hover{border-color:${G.gold}66;color:${G.goldLight};background:${G.gold}0A}
+
+.nav-btn{font-size:13px;font-weight:500;color:${G.gray};cursor:pointer;background:none;border:none;transition:color .2s;padding:0}
+.nav-btn:hover,.nav-btn.active{color:${G.white}}
+
+.glass{background:${G.bgCard};border:1px solid ${G.border};border-radius:12px}
+
+.input-field{width:100%;background:${G.bgCard2};border:1px solid ${G.border};border-radius:8px;padding:12px 16px;color:${G.white};font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}
+.input-field:focus{border-color:${G.gold}66}
+.input-field::placeholder{color:${G.grayDim}}
+
+.drop-zone{border:1.5px dashed ${G.border};border-radius:12px;cursor:pointer;transition:all .25s;background:${G.bgCard2};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:48px 24px;text-align:center}
+.drop-zone:hover,.drop-zone.over{border-color:${G.gold}88;background:${G.gold}07}
+
+.tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:10px;font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;font-weight:500;background:${G.gold}15;color:${G.gold};border:1px solid ${G.gold}33}
+
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot-ok{background:${G.success};box-shadow:0 0 6px ${G.success}}
+.dot-proc{background:${G.gold};animation:pulse-dot 1.2s infinite}
+.dot-err{background:${G.error}}
+.dot-idle{background:${G.grayDim}}
+
+.progress-bar{height:2px;background:${G.border};border-radius:1px;overflow:hidden;width:100%}
+.progress-fill{height:100%;background:linear-gradient(90deg,${G.goldDark},${G.gold},${G.goldLight});border-radius:1px;transition:width .4s ease;position:relative;overflow:hidden}
+.progress-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);animation:shimmer 1.5s infinite}
+
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:400;display:flex;align-items:center;justify-content:center;padding:24px}
+
+.dd-menu{position:absolute;right:0;top:calc(100% + 8px);width:200px;background:${G.bgCard};border:1px solid ${G.border};border-radius:10px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.6);z-index:200}
+.dd-item{width:100%;background:none;border:none;padding:12px 16px;color:${G.gray};font-size:12px;font-family:'DM Sans',sans-serif;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:10px;transition:all .15s;text-align:left}
+.dd-item:hover{background:${G.gold}0D;color:${G.goldLight}}
+.dd-item.danger:hover{background:${G.error}15;color:${G.error}}
+
+.tr-row:hover{background:${G.gold}08}
+.chat-user{background:${G.gold}22;border:1px solid ${G.gold}33;border-radius:12px 12px 4px 12px}
+.chat-bot{background:${G.bgCard2};border:1px solid ${G.border};border-radius:12px 12px 12px 4px}
+.sl{font-size:10px;font-family:'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:${G.gold};font-weight:500}
+
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite}
+
+@media(max-width:768px){.hide-m{display:none!important}}
+`;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface ConversionHistory { id:string; fileName:string; timestamp:Timestamp; extractedData:any[]; rowCount:number; userId:string; }
+interface FileItem { id:string; file:File; preview:string|null; status:'pending'|'processing'|'completed'|'error'; progress:number; statusMessage:string; extractedData:any[]|null; error?:string; }
+interface ChatMsg { role:'user'|'model'; content:string; ts:number; }
+interface Toast { id:string; type:'success'|'error'|'info'; msg:string; }
+interface Profile { displayName:string; photoURL:string; totalConversions:number; plan:'free'|'pro'; createdAt:string; }
+interface AuthCtx { user:FirebaseUser|null; profile:Profile|null; loading:boolean; refresh:()=>Promise<void>; }
+
+// ─── Auth Context ─────────────────────────────────────────────────────────────
+const Ctx = createContext<AuthCtx>({ user:null, profile:null, loading:true, refresh:async()=>{} });
+const useAuth = () => useContext(Ctx);
+
+const AuthProvider:React.FC<{children:React.ReactNode}> = ({children}) => {
+  const [user, setUser]       = useState<FirebaseUser|null>(null);
+  const [profile, setProfile] = useState<Profile|null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadProfile = async (uid:string) => {
     try {
-      const liveViewContext = activeItem ? {
-        filename: activeItem.file.name, status: activeItem.status, error: activeItem.error,
-        rowCount: activeItem.extractedData?.length || 0,
-        columnCount: activeItem.extractedData?.[0] ? Object.keys(activeItem.extractedData[0]).length : 0,
-        dataSample: activeItem.extractedData ? activeItem.extractedData.slice(0, 50) : null
-      } : null;
-      const response = await fetch('/api/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: chatMessages.map(({ role, content }) => ({ role, content })), context: liveViewContext ? JSON.stringify(liveViewContext) : undefined })
-      });
-      if (!response.ok) throw new Error('Chat failed');
-      const data = await response.json();
-      setChatMessages(prev => [...prev, { role: 'assistant', content: data.content, timestamp: new Date().toISOString() }]);
-    } catch (err: any) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: "Error: " + err.message, timestamp: new Date().toISOString() }]);
-    } finally { setIsChatLoading(false); }
+      const snap = await getDoc(doc(db,'users',uid));
+      if (snap.exists()) { setProfile(snap.data() as Profile); return; }
+      const p:Profile = { displayName:auth.currentUser?.displayName||'User', photoURL:'', totalConversions:0, plan:'free', createdAt:new Date().toISOString() };
+      await setDoc(doc(db,'users',uid), p);
+      setProfile(p);
+    } catch(e) { console.error(e); }
   };
 
-  useEffect(() => { if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight; }, [chatMessages, isChatLoading]);
-  useEffect(() => { localStorage.setItem('img2xl_chat_history', JSON.stringify(chatMessages)); }, [chatMessages]);
-  useEffect(() => {
-    const handler = (e: MouseEvent) => { if (downloadDropdownOpen && !(e.target as Element).closest('.dl-dropdown')) setDownloadDropdownOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [downloadDropdownOpen]);
+  useEffect(() => onAuthStateChanged(auth, async u => {
+    setUser(u);
+    if (u) await loadProfile(u.uid); else setProfile(null);
+    setLoading(false);
+  }),[]);
 
-  const clearChatHistory = () => { setChatMessages([]); localStorage.removeItem('img2xl_chat_history'); setShowClearConfirm(false); };
+  const val = useMemo(()=>({ user, profile, loading, refresh: async()=>{ if(user) await loadProfile(user.uid); } }),[user,profile,loading]);
+  return <Ctx.Provider value={val}>{children}</Ctx.Provider>;
+};
 
-  const exportChatHistory = () => {
-    if (!chatMessages.length) return;
-    const blob = new Blob([`IMG2XL CHAT EXPORT\n${'─'.repeat(50)}\n\n` + chatMessages.map(m => `[${new Date(m.timestamp).toLocaleString()}] ${m.role.toUpperCase()}\n${m.content}\n\n`).join('─'.repeat(30) + '\n\n')], { type: 'text/plain' });
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `img2xl_chat_${Date.now()}.txt` });
-    a.click();
-  };
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const Logo = ({sm=false}:{sm?:boolean}) => (
+  <div style={{display:'flex',alignItems:'center',gap:10}}>
+    <div style={{width:sm?30:36,height:sm?30:36,background:`linear-gradient(135deg,${G.goldDark},${G.gold})`,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <TableIcon size={sm?15:18} color="#000" strokeWidth={2.5}/>
+    </div>
+    <div>
+      <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:sm?15:18,color:G.white,letterSpacing:'-0.02em',lineHeight:1}}>
+        IMG<span style={{color:G.gold}}>2XL</span>
+      </div>
+      {!sm && <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:8,color:G.gold,letterSpacing:'0.15em',textTransform:'uppercase',marginTop:2}}>PRO · v4.2</div>}
+    </div>
+  </div>
+);
 
-  const processFiles = (selectedFiles: FileList | File[]) => {
-    const newItems: FileItem[] = [];
-    Array.from(selectedFiles).forEach(file => {
-      const isImage = file.type.startsWith('image/');
-      const isPDF = file.type === 'application/pdf';
-      if (!isImage && !isPDF) { setGlobalError(`"${file.name}" is not supported. Use PNG, JPEG, or PDF.`); return; }
-      if (file.size > 20 * 1024 * 1024) { setGlobalError(`"${file.name}" exceeds 20MB limit.`); return; }
-      const id = Math.random().toString(36).substr(2, 9);
-      const item: FileItem = { id, file, preview: null, status: 'pending', progress: 0, statusMessage: 'Ready', extractedData: null };
-      if (isImage) { const r = new FileReader(); r.onload = e => setItems(prev => prev.map(p => p.id === id ? { ...p, preview: e.target?.result as string } : p)); r.readAsDataURL(file); }
-      else item.preview = 'PDF_PLACEHOLDER';
-      newItems.push(item);
-    });
-    if (newItems.length) { setItems(prev => [...prev, ...newItems]); if (!activeId) setActiveId(newItems[0].id); setGlobalError(null); }
-  };
+// ─── Toasts ───────────────────────────────────────────────────────────────────
+const Toasts = ({items,dismiss}:{items:Toast[];dismiss:(id:string)=>void}) => (
+  <div style={{position:'fixed',top:72,right:20,zIndex:500,display:'flex',flexDirection:'column',gap:8,maxWidth:320}}>
+    <AnimatePresence>
+      {items.map(t => (
+        <motion.div key={t.id} initial={{opacity:0,x:40}} animate={{opacity:1,x:0}} exit={{opacity:0,x:40}}
+          style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',borderRadius:8,
+            background:t.type==='success'?`${G.success}15`:t.type==='error'?`${G.error}15`:`${G.gold}15`,
+            border:`1px solid ${t.type==='success'?G.success:t.type==='error'?G.error:G.gold}33`}}>
+          {t.type==='success'?<CheckCircle2 size={13} color={G.success}/>:t.type==='error'?<AlertCircle size={13} color={G.error}/>:<Info size={13} color={G.gold}/>}
+          <span style={{fontSize:12,color:G.white,flex:1}}>{t.msg}</span>
+          <button onClick={()=>dismiss(t.id)} style={{background:'none',border:'none',cursor:'pointer',color:G.gray}}><X size={11}/></button>
+        </motion.div>
+      ))}
+    </AnimatePresence>
+  </div>
+);
 
-  const removeItem = (id: string) => setItems(prev => { const f = prev.filter(i => i.id !== id); if (activeId === id) setActiveId(f.length ? f[f.length - 1].id : null); return f; });
+// ─── Navbar ───────────────────────────────────────────────────────────────────
+const Navbar = ({tab,setTab,onLogin,onLogout}:{tab:string;setTab:(t:string)=>void;onLogin:()=>void;onLogout:()=>void}) => {
+  const {user,profile} = useAuth();
+  const [sc,setSc] = useState(false);
+  const [dd,setDd] = useState(false);
+  const [mb,setMb] = useState(false);
 
-  const updateCell = (rowIndex: number, column: string, value: string) => {
-    if (!activeId) return;
-    setItems(prev => prev.map(item => item.id === activeId && item.extractedData ? { ...item, extractedData: item.extractedData.map((r, i) => i === rowIndex ? { ...r, [column]: value } : r) } : item));
-  };
+  useEffect(()=>{const h=()=>setSc(window.scrollY>20); window.addEventListener('scroll',h); return()=>window.removeEventListener('scroll',h);},[]);
 
-  const updateHeader = (oldH: string, newH: string) => {
-    if (!activeId || !newH || oldH === newH) return;
-    setItems(prev => prev.map(item => item.id === activeId && item.extractedData ? {
-      ...item, extractedData: item.extractedData.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k === oldH ? newH : k, v])))
-    } : item));
-  };
-
-  const addRow = (index: number) => {
-    if (!activeId) return;
-    setItems(prev => prev.map(item => {
-      if (item.id === activeId && item.extractedData) {
-        const headers = Object.keys(item.extractedData[0] || {});
-        const newRow = headers.reduce((a, h) => ({ ...a, [h]: '' }), {});
-        const d = [...item.extractedData]; d.splice(index + 1, 0, newRow);
-        return { ...item, extractedData: d };
-      }
-      return item;
-    }));
-  };
-
-  const deleteRow = (index: number) => {
-    if (!activeId) return;
-    setItems(prev => prev.map(item => item.id === activeId && item.extractedData ? { ...item, extractedData: item.extractedData.filter((_, i) => i !== index) } : item));
-  };
-
-  const extractSingle = async (id: string) => {
-    const item = items.find(i => i.id === id);
-    if (!item || item.status === 'completed' || item.status === 'processing') return;
-    const upd = (s: Partial<FileItem>) => setItems(prev => prev.map(i => i.id === id ? { ...i, ...s } : i));
-    upd({ status: 'processing', progress: 10, statusMessage: 'Preprocessing…', error: undefined });
-    try {
-      let all: any[] = [];
-      if (item.file.type === 'application/pdf') {
-        upd({ progress: 15, statusMessage: 'Reading PDF…' });
-        const chunks = await splitPdfIntoChunks(item.file, 8, (c, t) => upd({ progress: 15 + Math.floor((c / t) * 5), statusMessage: `Splitting… (${c}/${t})` }));
-        for (let i = 0; i < chunks.length; i++) {
-          upd({ progress: 25 + Math.floor((i / chunks.length) * 65), statusMessage: `Analysing part ${i + 1}/${chunks.length}…` });
-          all = [...all, ...await extractTableFromImage(chunks[i].data, chunks[i].mimeType, options)];
-        }
-      } else {
-        upd({ progress: 15, statusMessage: 'Optimising image…' });
-        const base64 = await optimizeImage(item.file);
-        if (base64.length > 50 * 1024 * 1024) throw new Error('File exceeds 50 MB limit after optimisation.');
-        upd({ progress: 40, statusMessage: 'AI Analysis…' });
-        all = await extractTableFromImage(base64, item.file.type, options);
-      }
-      upd({ status: 'completed', progress: 100, statusMessage: 'Complete', extractedData: all });
-    } catch (err: any) {
-      let msg = err.message || 'Extraction failed';
-      if (msg.includes('Safety') || msg.includes('blocked')) msg = 'Content blocked by safety filters.';
-      else if (msg.includes('429') || msg.includes('quota')) msg = 'Rate limit exceeded. Please wait and retry.';
-      upd({ status: 'error', progress: 0, statusMessage: 'Failed', error: msg });
-    }
-  };
-
-  const handleExtractAll = async () => {
-    const pending = items.filter(i => i.status === 'pending' || i.status === 'error');
-    if (!pending.length) return;
-    setIsProcessingAll(true);
-    for (const item of pending) await extractSingle(item.id);
-    setIsProcessingAll(false);
-  };
-
-  const downloadExcel = async (item: FileItem) => {
-    if (!item.extractedData) return;
-    try {
-      const r = await fetch('/api/generate-excel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: item.extractedData, filename: item.file.name.split('.')[0] }) });
-      if (!r.ok) throw new Error();
-      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: `${item.file.name.split('.')[0]}.xlsx` });
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } catch { setGlobalError(`Failed to download "${item.file.name}"`); }
-  };
-
-  const downloadCSV = (item: FileItem) => {
-    if (!item.extractedData?.length) return;
-    const headers = Object.keys(item.extractedData[0]);
-    const csv = [headers.join(','), ...item.extractedData.map(row => headers.map(h => { const c = String(row[h] || '').replace(/"/g, '""'); return c.includes(',') || c.includes('"') || c.includes('\n') ? `"${c}"` : c; }).join(','))].join('\n');
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `${item.file.name.split('.')[0]}.csv` });
-    a.click();
-  };
-
-  const downloadJSON = (item: FileItem) => {
-    if (!item.extractedData) return;
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([JSON.stringify(item.extractedData, null, 2)], { type: 'application/json' })), download: `${item.file.name.split('.')[0]}.json` });
-    a.click();
-  };
-
-  const downloadAllAsZip = async () => {
-    const done = items.filter(i => i.status === 'completed' && i.extractedData);
-    if (!done.length) return;
-    const zip = new JSZip();
-    for (const item of done) {
-      try {
-        const r = await fetch('/api/generate-excel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: item.extractedData, filename: item.file.name.split('.')[0] }) });
-        if (r.ok) zip.file(`${item.file.name.split('.')[0]}.xlsx`, await r.blob());
-      } catch {}
-    }
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await zip.generateAsync({ type: 'blob' })), download: `img2xl_${Date.now()}.zip` });
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  };
-
-  const totalRows = items.reduce((a, i) => a + (i.extractedData?.length || 0), 0);
-  const completedCount = items.filter(i => i.status === 'completed').length;
+  const pubLinks = [{id:'landing',l:'Home'},{id:'about',l:'About'},{id:'pricing',l:'Pricing'}];
+  const priLinks = [{id:'convert',l:'Convert'},{id:'history',l:'History'}];
+  const links    = user ? [pubLinks[0],...priLinks,...pubLinks.slice(1)] : pubLinks;
 
   return (
-    <div className="min-h-screen flex flex-col font-sans overflow-hidden" style={{ background: '#080810', fontFamily: "'DM Sans', 'Inter', sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&family=Playfair+Display:ital,wght@0,700;1,700&display=swap');
-        :root {
-          --gold: #C9A84C;
-          --gold-dim: #8B6914;
-          --cream: #F5EDD6;
-          --ink: #0A0A12;
-          --glass: rgba(255,255,255,0.03);
-          --border: rgba(255,255,255,0.06);
-          --accent: #C9A84C;
-        }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        .thin-scroll::-webkit-scrollbar { width: 2px; }
-        .thin-scroll::-webkit-scrollbar-track { background: transparent; }
-        .thin-scroll::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
-        .serif { font-family: 'Playfair Display', Georgia, serif; }
-        .mono { font-family: 'DM Mono', 'Courier New', monospace; }
-        .panel { background: var(--glass); border: 1px solid var(--border); backdrop-filter: blur(20px); border-radius: 16px; }
-        .gold-glow { box-shadow: 0 0 30px rgba(201,168,76,0.15); }
-        .upload-zone { border: 1px dashed rgba(201,168,76,0.2); border-radius: 12px; transition: all 0.2s; }
-        .upload-zone:hover { border-color: var(--gold); background: rgba(201,168,76,0.04); }
-        .file-row { transition: all 0.15s; border: 1px solid transparent; border-radius: 12px; }
-        .file-row:hover { background: rgba(255,255,255,0.03); }
-        .file-row.active { background: rgba(201,168,76,0.07); border-color: rgba(201,168,76,0.25); }
-        .btn-gold { background: var(--gold); color: #000; font-weight: 700; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; border: none; transition: all 0.15s; }
-        .btn-gold:hover { background: #DFC06A; transform: translateY(-1px); }
-        .btn-gold:active { transform: translateY(0); }
-        .btn-ghost { background: transparent; border: 1px solid var(--border); color: rgba(255,255,255,0.5); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; transition: all 0.15s; }
-        .btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
-        .tag { font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
-        .tag-green { background: rgba(52,211,153,0.1); color: #34D399; border: 1px solid rgba(52,211,153,0.2); }
-        .tag-gold { background: rgba(201,168,76,0.1); color: var(--gold); border: 1px solid rgba(201,168,76,0.2); }
-        .tag-red { background: rgba(239,68,68,0.1); color: #F87171; border: 1px solid rgba(239,68,68,0.2); }
-        .data-table { width: 100%; border-collapse: collapse; }
-        .data-table th { background: #0D0D18; border-bottom: 1px solid var(--border); padding: 12px 16px; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(255,255,255,0.35); font-weight: 600; text-align: left; position: sticky; top: 0; z-index: 10; }
-        .data-table td { border-bottom: 1px solid rgba(255,255,255,0.03); padding: 10px 16px; font-size: 11px; color: rgba(255,255,255,0.65); vertical-align: top; }
-        .data-table tr:hover td { background: rgba(201,168,76,0.03); }
-        .chat-user { background: rgba(201,168,76,0.1); border: 1px solid rgba(201,168,76,0.15); border-radius: 12px 12px 2px 12px; padding: 12px 16px; }
-        .chat-ai { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px; padding: 12px 16px; }
-        .divider { width: 1px; height: 16px; background: var(--border); }
-        .stat-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-        .noise-bg { position: relative; }
-        .noise-bg::before { content: ''; position: absolute; inset: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); opacity: 0.4; pointer-events: none; border-radius: inherit; }
-      `}</style>
+    <nav style={{position:'fixed',top:0,left:0,right:0,zIndex:100,background:sc?`${G.bg}EE`:'transparent',backdropFilter:sc?'blur(20px)':'none',borderBottom:sc?`1px solid ${G.border}`:'1px solid transparent',transition:'all .3s'}}>
+      <div style={{maxWidth:1280,margin:'0 auto',padding:'0 24px',height:60,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <button onClick={()=>setTab('landing')} style={{background:'none',border:'none',cursor:'pointer'}}><Logo/></button>
 
-      {/* Top Nav */}
-      <nav style={{ borderBottom: '1px solid var(--border)', background: 'rgba(8,8,16,0.8)', backdropFilter: 'blur(24px)' }} className="px-8 py-5 flex justify-between items-center shrink-0 sticky top-0 z-50">
-        <div className="flex items-center gap-10">
-          <div className="flex items-center gap-3">
-            <div style={{ background: 'var(--gold)', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8 }}>
-              <TableIcon size={18} color="#000" />
-            </div>
-            <div>
-              <div style={{ fontFamily: 'DM Sans', fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: '#fff' }}>
-                IMG<span style={{ color: 'var(--gold)' }}>2XL</span>
-              </div>
-              <div style={{ fontSize: 8, letterSpacing: '0.2em', color: 'var(--gold-dim)', fontFamily: 'DM Mono', marginTop: -2 }}>PRO · v4.2</div>
-            </div>
-          </div>
-          <div className="hidden md:flex items-center gap-6" style={{ fontSize: 11, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>
-            {['Documentation', 'API', 'Pricing'].map(l => <a key={l} href="#" style={{ transition: 'color 0.15s' }} onMouseEnter={e => (e.target as HTMLElement).style.color = 'var(--gold)'} onMouseLeave={e => (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.3)'}>{l}</a>)}
-          </div>
+        {/* Desktop */}
+        <div className="hide-m" style={{display:'flex',alignItems:'center',gap:32}}>
+          {links.map(l=>(
+            <button key={l.id} className={`nav-btn ${tab===l.id?'active':''}`} onClick={()=>setTab(l.id)} style={{color:tab===l.id?G.white:G.gray}}>{l.l}</button>
+          ))}
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px' }}>
-            <div className="flex items-center gap-2">
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#34D399', boxShadow: '0 0 8px #34D399' }} />
-              <span style={{ fontSize: 9, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', fontFamily: 'DM Mono' }}>SYSTEM NOMINAL</span>
-            </div>
-            <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
-            <div className="flex items-center gap-1.5">
-              <Zap size={11} color="var(--gold)" />
-              <span style={{ fontSize: 9, letterSpacing: '0.12em', color: 'var(--gold)', fontFamily: 'DM Mono' }}>28ms</span>
-            </div>
-          </div>
-          <button className="btn-gold px-6 py-2 rounded-lg">Upgrade</button>
-        </div>
-      </nav>
 
-      <main className="flex-1 grid gap-5 px-5 pb-5 pt-5 overflow-hidden" style={{ gridTemplateColumns: '320px 1fr 340px', height: 'calc(100vh - 73px)' }}>
-        
-        {/* LEFT PANEL */}
-        <aside className="flex flex-col gap-4 overflow-hidden">
-          {/* Headline */}
-          <div className="shrink-0 px-1 pt-2">
-            <h1 style={{ fontFamily: 'Playfair Display', fontSize: 42, fontWeight: 700, lineHeight: 0.92, letterSpacing: '-0.03em', color: '#fff' }}>
-              Visual<br /><em style={{ color: 'var(--gold)' }}>data,</em><br />structured.
-            </h1>
-            <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.3)', lineHeight: 1.6, fontWeight: 400 }}>
-              Enterprise extraction from images and PDFs. Instant Excel output.
-            </p>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          {/* Status badge */}
+          <div className="hide-m" style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',borderRadius:4,background:`${G.success}15`,border:`1px solid ${G.success}33`}}>
+            <span className="dot dot-ok" style={{width:6,height:6}}/>
+            <span className="fm" style={{fontSize:9,color:G.success,letterSpacing:'0.08em'}}>SYSTEM NOMINAL</span>
           </div>
 
-          {/* File Queue */}
-          <div className="panel flex-1 flex flex-col overflow-hidden noise-bg" style={{ padding: '20px' }}>
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <div className="flex items-center gap-2">
-                <Files size={13} color="var(--gold)" />
-                <span style={{ fontSize: 10, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', fontWeight: 600, textTransform: 'uppercase' }}>Queue</span>
-                <span style={{ fontSize: 10, background: 'rgba(201,168,76,0.1)', color: 'var(--gold)', padding: '1px 7px', borderRadius: 4, fontFamily: 'DM Mono', border: '1px solid rgba(201,168,76,0.2)' }}>{items.length}</span>
-              </div>
-              {items.length > 0 && <button onClick={() => setItems([])} style={{ fontSize: 9, color: 'rgba(239,68,68,0.5)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, cursor: 'pointer', background: 'none', border: 'none', transition: 'color 0.15s' }} onMouseEnter={e => (e.target as HTMLElement).style.color = '#F87171'} onMouseLeave={e => (e.target as HTMLElement).style.color = 'rgba(239,68,68,0.5)'}>Clear all</button>}
-            </div>
-
-            <div className="flex-1 overflow-y-auto thin-scroll space-y-2">
-              <AnimatePresence initial={false}>
-                {items.map(item => (
-                  <motion.div key={item.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}
-                    onClick={() => setActiveId(item.id)}
-                    className={cn('file-row p-3 flex items-center gap-3 cursor-pointer group', activeId === item.id && 'active')}
-                  >
-                    <div style={{ width: 36, height: 36, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {item.file.type === 'application/pdf' ? <FileText size={16} color="var(--gold)" /> : <ImageIcon size={16} color="var(--gold)" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p style={{ fontSize: 11, fontWeight: 600, color: activeId === item.id ? '#fff' : 'rgba(255,255,255,0.55)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</p>
-                      <div className="mt-1">
-                        {item.status === 'processing' && (
-                          <div>
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <Loader2 size={9} color="var(--gold)" className="animate-spin" />
-                              <span style={{ fontSize: 9, color: 'var(--gold)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 }}>{item.statusMessage}</span>
-                            </div>
-                            <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 1, overflow: 'hidden' }}>
-                              <motion.div style={{ height: '100%', background: 'var(--gold)' }} animate={{ width: `${item.progress}%` }} transition={{ duration: 0.3 }} />
-                            </div>
-                          </div>
-                        )}
-                        {item.status === 'completed' && <span className="tag tag-green">Done</span>}
-                        {item.status === 'error' && <div className="flex items-center gap-2"><span className="tag tag-red">Error</span><button onClick={e => { e.stopPropagation(); extractSingle(item.id); }}><RefreshCw size={10} color="var(--gold)" /></button></div>}
-                        {item.status === 'pending' && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Pending</span>}
-                      </div>
-                    </div>
-                    <button onClick={e => { e.stopPropagation(); removeItem(item.id); }} style={{ opacity: 0, transition: 'opacity 0.15s' }} className="group-hover:opacity-100" onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = '1'} onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = '0'}>
-                      <X size={13} color="rgba(239,68,68,0.6)" />
-                    </button>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-
-              <div className="upload-zone p-8 text-center cursor-pointer mt-2" onClick={() => fileInputRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); processFiles(e.dataTransfer.files); }}>
-                <input type="file" ref={fileInputRef} onChange={e => e.target.files && processFiles(e.target.files)} className="hidden" accept="image/*,application/pdf" multiple />
-                <Upload size={20} color="var(--gold)" style={{ margin: '0 auto 10px', opacity: 0.6 }} />
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>Drop files or click</p>
-                <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.15)', marginTop: 4 }}>PNG, JPEG, PDF · max 20 MB</p>
-              </div>
-            </div>
-
-            {items.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 16 }} className="shrink-0 space-y-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={options.detectMultipleTables} onChange={e => setOptions(p => ({ ...p, detectMultipleTables: e.target.checked }))} style={{ accentColor: 'var(--gold)', width: 13, height: 13 }} />
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>Detect multiple tables</span>
-                </label>
-                <button onClick={handleExtractAll} disabled={isProcessingAll || items.every(i => i.status === 'completed')} className="btn-gold w-full py-3 rounded-xl" style={{ opacity: (isProcessingAll || items.every(i => i.status === 'completed')) ? 0.4 : 1, cursor: (isProcessingAll || items.every(i => i.status === 'completed')) ? 'not-allowed' : 'pointer' }}>
-                  {isProcessingAll ? `Processing… (${completedCount}/${items.length})` : 'Extract All Files'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-2 gap-3 shrink-0">
-            <div className="stat-card">
-              <div style={{ fontSize: 8, letterSpacing: '0.15em', color: 'rgba(255,255,255,0.25)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>Total Rows</div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#fff', lineHeight: 1, fontFamily: 'DM Mono' }}>{totalRows.toLocaleString()}</div>
-            </div>
-            <div className="stat-card">
-              <div style={{ fontSize: 8, letterSpacing: '0.15em', color: 'rgba(255,255,255,0.25)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>Files Done</div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--gold)', lineHeight: 1, fontFamily: 'DM Mono' }}>{completedCount}/{items.length || '—'}</div>
-            </div>
-          </div>
-
-          {items.some(i => i.status === 'completed') && (
-            <button onClick={downloadAllAsZip} className="btn-ghost w-full py-3 rounded-xl flex items-center justify-center gap-2 shrink-0">
-              <Package size={13} /> Download All as ZIP
-            </button>
-          )}
-
-          {globalError && (
-            <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 14px' }} className="flex items-start gap-2 shrink-0">
-              <AlertCircle size={13} color="#F87171" style={{ marginTop: 1, flexShrink: 0 }} />
-              <p style={{ fontSize: 10, color: '#F87171', lineHeight: 1.5 }}>{globalError}</p>
-            </div>
-          )}
-        </aside>
-
-        {/* MIDDLE PANEL */}
-        <section className="flex flex-col overflow-hidden h-full">
-          <AnimatePresence mode="wait">
-            {!activeItem ? (
-              <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="panel flex-1 overflow-y-auto thin-scroll noise-bg"
-              >
-                {/* Hero */}
-                <div style={{ padding: '60px 64px', position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: -60, right: -60, opacity: 0.04 }}>
-                    <TableIcon size={400} color="var(--gold)" />
-                  </div>
-                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 20, padding: '6px 14px', marginBottom: 28 }}>
-                      <Sparkles size={12} color="var(--gold)" />
-                      <span style={{ fontSize: 10, color: 'var(--gold)', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700 }}>AI-Powered · Stateless · Instant</span>
-                    </div>
-                    <h1 style={{ fontFamily: 'Playfair Display', fontSize: 72, fontWeight: 700, lineHeight: 0.88, letterSpacing: '-0.03em', color: '#fff', marginBottom: 28 }}>
-                      From<br /><em style={{ color: 'var(--gold)' }}>image</em><br />to data.
-                    </h1>
-                    <p style={{ fontSize: 15, color: 'rgba(255,255,255,0.4)', lineHeight: 1.7, maxWidth: 480, marginBottom: 40, fontWeight: 400 }}>
-                      Img2XL uses computer vision and language models to extract every cell, header, and row from your images and PDFs — and exports them directly to Excel.
-                    </p>
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <button onClick={() => fileInputRef.current?.click()} className="btn-gold px-10 py-4 rounded-xl" style={{ fontSize: 12 }}>Upload a file</button>
-                      <div className="flex items-center gap-3" style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>
-                        <ShieldCheck size={13} color="rgba(255,255,255,0.2)" /> Stateless · No data stored
-                      </div>
-                    </div>
-                  </motion.div>
+          {user ? (
+            <div style={{position:'relative'}}>
+              <button onClick={()=>setDd(d=>!d)} style={{display:'flex',alignItems:'center',gap:8,background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:8,padding:'6px 12px 6px 6px',cursor:'pointer'}}>
+                <div style={{width:28,height:28,borderRadius:6,background:`linear-gradient(135deg,${G.goldDark},${G.gold})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#000'}}>
+                  {(user.email||'U')[0].toUpperCase()}
                 </div>
+                <span className="hide-m" style={{fontSize:12,color:G.white,fontWeight:500}}>{profile?.displayName||user.email?.split('@')[0]}</span>
+                <ChevronDown size={12} color={G.gray}/>
+              </button>
+              <AnimatePresence>
+                {dd && (
+                  <motion.div className="dd-menu" initial={{opacity:0,y:-8,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:-8,scale:.96}} transition={{duration:.15}}>
+                    <div style={{padding:'12px 16px',borderBottom:`1px solid ${G.border}`}}>
+                      <div style={{fontSize:12,color:G.white,fontWeight:600}}>{profile?.displayName||'User'}</div>
+                      <div style={{fontSize:11,color:G.gray,marginTop:2}}>{user.email}</div>
+                      <div className="tag" style={{marginTop:6}}>{profile?.plan==='pro'?'⭐ Pro':'Free'}</div>
+                    </div>
+                    <button className="dd-item" onClick={()=>{setTab('account');setDd(false)}}><UserCircle2 size={14}/> Account</button>
+                    <button className="dd-item" onClick={()=>{setTab('history');setDd(false)}}><History size={14}/> History</button>
+                    <div style={{borderTop:`1px solid ${G.border}`,margin:'4px 0'}}/>
+                    <button className="dd-item danger" onClick={()=>{onLogout();setDd(false)}}><LogOut size={14}/> Logout</button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <button className="btn-gold" style={{padding:'8px 20px'}} onClick={onLogin}>Sign In</button>
+          )}
 
-                {/* Feature Grid */}
-                <div style={{ padding: '0 64px 64px', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
-                  {[
-                    { icon: Zap, title: 'Fast Extraction', desc: 'Complex tables extracted in seconds with our parallelised pipeline.' },
-                    { icon: Globe, title: '40+ Languages', desc: 'Full support for RTL scripts, Asian typography, and mixed-language docs.' },
-                    { icon: Database, title: 'Smart Schema', desc: 'Headers inferred, data types normalised, noise removed automatically.' },
-                    { icon: Lock, title: 'Zero Storage', desc: 'Images processed in memory and discarded. Nothing stored on our servers.' },
-                    { icon: Layers, title: 'Multi-Format', desc: 'PNG, JPEG, PDF — all processed through the same precision pipeline.' },
-                    { icon: Activity, title: 'Batch Mode', desc: 'Upload entire document sets and process them in one queued operation.' },
-                  ].map((f, i) => (
-                    <motion.div key={i} whileHover={{ y: -4 }} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 14, padding: '24px', transition: 'border-color 0.2s' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(201,168,76,0.3)'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'}
-                    >
-                      <div style={{ width: 40, height: 40, background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                        <f.icon size={18} color="var(--gold)" />
-                      </div>
-                      <h3 style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 8, letterSpacing: '-0.01em' }}>{f.title}</h3>
-                      <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', lineHeight: 1.6 }}>{f.desc}</p>
-                    </motion.div>
+          <button onClick={()=>setMb(m=>!m)} style={{background:'none',border:'none',cursor:'pointer',color:G.gray,padding:4,display:'none'}} className="show-m">
+            {mb?<X size={20}/>:<Menu size={20}/>}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile menu */}
+      <AnimatePresence>
+        {mb && (
+          <motion.div initial={{height:0}} animate={{height:'auto'}} exit={{height:0}} style={{overflow:'hidden',background:G.bgCard,borderTop:`1px solid ${G.border}`}}>
+            <div style={{padding:16,display:'flex',flexDirection:'column',gap:4}}>
+              {links.map(l=>(
+                <button key={l.id} onClick={()=>{setTab(l.id);setMb(false);}} style={{background:tab===l.id?`${G.gold}15`:'none',border:'none',borderRadius:8,padding:'12px 16px',color:tab===l.id?G.gold:G.gray,fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:500,textAlign:'left',cursor:'pointer'}}>{l.l}</button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </nav>
+  );
+};
+
+// ─── Landing ──────────────────────────────────────────────────────────────────
+const Landing = ({onStart}:{onStart:()=>void}) => {
+  const feats = [
+    {icon:<Zap size={20} color={G.gold}/>, t:'Instant Extraction', d:'Gemini AI reads every cell, header, and row from your image in seconds.'},
+    {icon:<FileSpreadsheet size={20} color={G.gold}/>, t:'Excel-Ready Output', d:'Download a clean, structured .xlsx — open straight in Excel or Sheets.'},
+    {icon:<ShieldCheck size={20} color={G.gold}/>, t:'Secure & Private', d:'Stateless processing. No image data stored beyond your own history.'},
+  ];
+  const steps = [
+    {n:'01',t:'Upload',d:'Drop any receipt, invoice, or table image.'},
+    {n:'02',t:'Extract',d:'AI scans and structures all tabular data instantly.'},
+    {n:'03',t:'Download',d:'Get your Excel file, rename headers if needed.'},
+  ];
+
+  return (
+    <div style={{paddingTop:60}}>
+      {/* Hero */}
+      <section style={{minHeight:'100vh',display:'flex',alignItems:'center',padding:'0 24px',maxWidth:1280,margin:'0 auto',gap:80,flexWrap:'wrap'}}>
+        <motion.div initial={{opacity:0,x:-30}} animate={{opacity:1,x:0}} transition={{duration:.7}} style={{flex:1,minWidth:280}}>
+          <div className="tag" style={{marginBottom:28}}><Sparkles size={10}/> AI-POWERED · STATELESS · INSTANT</div>
+          <h1 className="fd" style={{fontSize:'clamp(48px,7vw,88px)',lineHeight:.92,fontWeight:900,color:G.white,marginBottom:28}}>
+            VISUAL<br/><em className="gold-text" style={{fontStyle:'italic'}}>DATA,</em><br/>STRUCTURED.
+          </h1>
+          <p style={{fontSize:15,color:G.gray,lineHeight:1.7,maxWidth:400,marginBottom:40}}>
+            Enterprise extraction from images and PDFs.<br/>Instant Excel output.
+          </p>
+          <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+            <button className="btn-gold" style={{padding:'14px 28px',fontSize:12}} onClick={onStart}><Upload size={14}/> Upload a File</button>
+            <button className="btn-ghost" style={{padding:'14px 24px'}} onClick={()=>document.getElementById('hiw')?.scrollIntoView({behavior:'smooth'})}>How It Works</button>
+          </div>
+          <div style={{marginTop:32,display:'flex',alignItems:'center',gap:6,color:G.grayDim,fontSize:12}}>
+            <ShieldCheck size={12} color={G.grayDim}/> Stateless · No data stored
+          </div>
+        </motion.div>
+
+        {/* Mock preview */}
+        <motion.div className="hide-m" initial={{opacity:0,x:30}} animate={{opacity:1,x:0}} transition={{duration:.7,delay:.15}} style={{flex:1,maxWidth:460}}>
+          <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:16,overflow:'hidden',boxShadow:`0 40px 80px rgba(0,0,0,.5)`}}>
+            <div style={{padding:'12px 18px',borderBottom:`1px solid ${G.border}`,display:'flex',alignItems:'center',gap:12,background:G.bgCard2}}>
+              <div style={{display:'flex',gap:5}}>
+                {['#F87171','#FBBF24','#4ADE80'].map(c=><div key={c} style={{width:9,height:9,borderRadius:'50%',background:c}}/>)}
+              </div>
+              <div style={{flex:1,height:7,background:G.border,borderRadius:4}}/>
+            </div>
+            <div style={{padding:20}}>
+              <div className="tag" style={{marginBottom:14}}>Extracted Data · 18 rows · 3 columns</div>
+              <div style={{borderRadius:8,overflow:'hidden',border:`1px solid ${G.border}`}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',padding:'9px 14px',background:G.bgCard2,gap:16}}>
+                  {['Category','Subcategory','Amount'].map(h=>(
+                    <span key={h} className="fm" style={{fontSize:9,color:G.gold,letterSpacing:'0.1em',textTransform:'uppercase'}}>{h}</span>
                   ))}
                 </div>
+                {[['Food','Restaurant','$42.50'],['Transport','Uber','$18.00'],['Utilities','Electric','$120.00'],['Shopping','Groceries','$85.75']].map(([a,b,c],i)=>(
+                  <div key={i} className="tr-row" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',padding:'9px 14px',gap:16,borderTop:`1px solid ${G.border}`,fontSize:12,color:G.gray}}>
+                    <span style={{color:G.white}}>{a}</span><span>{b}</span>
+                    <span className="fm" style={{color:G.gold}}>{c}</span>
+                  </div>
+                ))}
+              </div>
+              <button className="btn-gold" style={{marginTop:14,padding:'10px 0',width:'100%',justifyContent:'center',fontSize:11}}><Download size={12}/> Download Excel</button>
+            </div>
+          </div>
+        </motion.div>
+      </section>
+
+      {/* Features */}
+      <section style={{padding:'100px 24px',maxWidth:1280,margin:'0 auto'}}>
+        <p className="sl" style={{textAlign:'center',marginBottom:16}}>Core Features</p>
+        <h2 className="fd" style={{fontSize:38,fontWeight:700,textAlign:'center',color:G.white,marginBottom:56}}>Built for precision.</h2>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:20}}>
+          {feats.map((f,i)=>(
+            <motion.div key={i} initial={{opacity:0,y:20}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{delay:i*.1}}
+              style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:32,transition:'border-color .2s'}}
+              whileHover={{borderColor:`${G.gold}44`} as any}>
+              <div style={{width:42,height:42,borderRadius:10,background:`${G.gold}15`,border:`1px solid ${G.gold}33`,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:20}}>{f.icon}</div>
+              <h3 style={{fontSize:16,fontWeight:600,color:G.white,marginBottom:10}}>{f.t}</h3>
+              <p style={{fontSize:13,color:G.gray,lineHeight:1.7}}>{f.d}</p>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section id="hiw" style={{padding:'100px 24px',borderTop:`1px solid ${G.border}`,borderBottom:`1px solid ${G.border}`,background:G.bgCard2}}>
+        <div style={{maxWidth:800,margin:'0 auto',textAlign:'center'}}>
+          <p className="sl" style={{marginBottom:16}}>How It Works</p>
+          <h2 className="fd" style={{fontSize:38,fontWeight:700,color:G.white,marginBottom:56}}>Three steps to structured data.</h2>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:32}}>
+            {steps.map((s,i)=>(
+              <motion.div key={i} initial={{opacity:0,y:20}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{delay:i*.15}} style={{textAlign:'center'}}>
+                <div className="fm" style={{fontSize:32,color:`${G.gold}44`,marginBottom:14}}>{s.n}</div>
+                <h3 style={{fontSize:16,fontWeight:600,color:G.white,marginBottom:8}}>{s.t}</h3>
+                <p style={{fontSize:13,color:G.gray,lineHeight:1.7}}>{s.d}</p>
               </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-            ) : activeItem.status === 'processing' ? (
-              <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="panel flex-1 flex flex-col items-center justify-center noise-bg"
-              >
-                <div style={{ position: 'relative', marginBottom: 32 }}>
-                  <div style={{ width: 80, height: 80, border: '2px solid rgba(255,255,255,0.06)', borderTopColor: 'var(--gold)', borderRadius: '50%' }} className="animate-spin" />
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Sparkles size={24} color="var(--gold)" />
-                  </div>
+      {/* About */}
+      <section id="about" style={{padding:'100px 24px',maxWidth:900,margin:'0 auto'}}>
+        <p className="sl" style={{marginBottom:16}}>About</p>
+        <h2 className="fd" style={{fontSize:38,fontWeight:700,color:G.white,marginBottom:24}}>Built by Himesh & Tiru.</h2>
+        <p style={{fontSize:15,color:G.gray,lineHeight:1.8,maxWidth:620,marginBottom:40}}>
+          Img2XL was created to eliminate the time wasted manually re-typing data from images into spreadsheets.
+          We combined Google Gemini's vision AI with a clean, fast interface — so you go from image to Excel in seconds.
+        </p>
+        <div style={{display:'flex',flexWrap:'wrap',gap:10,marginBottom:40}}>
+          {['React','TypeScript','Firebase','Gemini AI','SheetJS','Tailwind'].map(t=><div key={t} className="tag">{t}</div>)}
+        </div>
+        <div style={{display:'flex',gap:14,flexWrap:'wrap'}}>
+          <a href="mailto:himeshandtiru@gmail.com" className="btn-ghost" style={{padding:'10px 20px',textDecoration:'none'}}><Mail size={13}/> himeshandtiru@gmail.com</a>
+          <a href="https://github.com" target="_blank" rel="noreferrer" className="btn-ghost" style={{padding:'10px 20px',textDecoration:'none'}}><Github size={13}/> GitHub</a>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section id="pricing" style={{padding:'100px 24px',borderTop:`1px solid ${G.border}`,background:G.bgCard2}}>
+        <div style={{maxWidth:900,margin:'0 auto'}}>
+          <p className="sl" style={{marginBottom:16,textAlign:'center'}}>Pricing</p>
+          <h2 className="fd" style={{fontSize:38,fontWeight:700,color:G.white,marginBottom:56,textAlign:'center'}}>Start free. Scale up.</h2>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:20}}>
+            {/* Free */}
+            <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:36}}>
+              <h3 style={{fontSize:20,fontWeight:600,color:G.white,marginBottom:6}}>Free</h3>
+              <div style={{fontSize:40,fontWeight:700,color:G.white,marginBottom:24}}>$0<span style={{fontSize:13,color:G.gray,fontWeight:400}}>/mo</span></div>
+              {['5 conversions/day','Excel download','Session history','Editable headers'].map(f=>(
+                <div key={f} style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}><CheckCircle2 size={13} color={G.gold}/><span style={{fontSize:13,color:G.gray}}>{f}</span></div>
+              ))}
+              <button className="btn-ghost" style={{width:'100%',justifyContent:'center',padding:'12px 0',marginTop:20}} onClick={onStart}>Get Started Free</button>
+            </div>
+            {/* Pro */}
+            <div style={{background:`linear-gradient(135deg,${G.gold}12,${G.bgCard})`,border:`1px solid ${G.gold}44`,borderRadius:12,padding:36,position:'relative'}}>
+              <div style={{position:'absolute',top:16,right:16,background:G.gold,color:'#000',fontSize:9,fontWeight:700,letterSpacing:'0.1em',padding:'3px 8px',borderRadius:4,textTransform:'uppercase'}}>Recommended</div>
+              <h3 style={{fontSize:20,fontWeight:600,color:G.white,marginBottom:6}}>Pro</h3>
+              <div style={{fontSize:40,fontWeight:700,color:G.white,marginBottom:24}}>$12<span style={{fontSize:13,color:G.gray,fontWeight:400}}>/mo</span></div>
+              {['Unlimited conversions','Cloud history vault','Batch processing','Priority AI access','API access'].map(f=>(
+                <div key={f} style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}><CheckCircle2 size={13} color={G.gold}/><span style={{fontSize:13,color:G.gray}}>{f}</span></div>
+              ))}
+              <button className="btn-gold" style={{width:'100%',justifyContent:'center',padding:'12px 0',marginTop:20}}>Upgrade to Pro</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer style={{borderTop:`1px solid ${G.border}`,padding:'40px 24px',display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:16,maxWidth:1280,margin:'0 auto'}}>
+        <Logo sm/>
+        <div style={{display:'flex',gap:24}}>
+          {['About','Pricing','Privacy'].map(l=><span key={l} style={{fontSize:12,color:G.grayDim,cursor:'pointer'}}>{l}</span>)}
+        </div>
+        <div className="fm" style={{fontSize:11,color:G.grayDim}}>© 2026 IMG2XL · Built by Himesh & Tiru</div>
+      </footer>
+    </div>
+  );
+};
+
+// ─── File Card ────────────────────────────────────────────────────────────────
+const FileCard = ({file,onRemove,onDownload,onUpdate}:{file:FileItem;onRemove:()=>void;onDownload:()=>void;onUpdate:(f:FileItem)=>void}) => {
+  const [editH, setEditH] = useState<string|null>(null);
+  const [draft, setDraft] = useState('');
+  const [selCols, setSelCols] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  const toggleCol = (c:string) => setSelCols(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c]);
+
+  const merge = () => {
+    if (selCols.length<2||!file.extractedData) return;
+    const key = selCols.join(' + ');
+    const data = file.extractedData.map(row=>{ const m=selCols.map(c=>row[c]).filter(Boolean).join(' '); const r={...row}; selCols.forEach(c=>delete r[c]); return {...r,[key]:m}; });
+    onUpdate({...file,extractedData:data}); setSelCols([]);
+  };
+
+  const rename = (old:string) => {
+    if (!draft.trim()||!file.extractedData) { setEditH(null); return; }
+    const data = file.extractedData.map(row=>{ const r={...row}; r[draft.trim()]=r[old]; delete r[old]; return r; });
+    onUpdate({...file,extractedData:data}); setEditH(null);
+  };
+
+  const copy = () => {
+    if (!file.extractedData) return;
+    const hs = Object.keys(file.extractedData[0]);
+    const rows = file.extractedData.map(r=>hs.map(h=>r[h]).join('\t'));
+    navigator.clipboard.writeText([hs.join('\t'),...rows].join('\n'));
+    setCopied(true); setTimeout(()=>setCopied(false),2000);
+  };
+
+  const sc = file.status==='completed'?G.success:file.status==='error'?G.error:G.gold;
+  const sl = file.status==='completed'?'Complete':file.status==='processing'?'Processing…':file.status==='error'?'Failed':'Queued';
+
+  return (
+    <motion.div layout initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,overflow:'hidden'}}>
+      {/* Bar */}
+      <div style={{padding:'13px 18px',borderBottom:`1px solid ${G.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+          <span className={`dot dot-${file.status==='completed'?'ok':file.status==='processing'?'proc':file.status==='error'?'err':'idle'}`}/>
+          <span style={{fontSize:13,fontWeight:600,color:G.white,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:240}}>{file.file.name}</span>
+          <span className="fm" style={{fontSize:10,color:sc}}>{sl}</span>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
+          {selCols.length>=2 && <button className="btn-ghost" style={{padding:'6px 10px',fontSize:10}} onClick={merge}><ColumnsIcon size={11}/> Merge</button>}
+          {file.status==='completed' && <>
+            <button className="btn-ghost" style={{padding:'6px 9px'}} onClick={copy} title="Copy table">{copied?<CheckCircle2 size={13} color={G.success}/>:<Copy size={13}/>}</button>
+            <button className="btn-gold" style={{padding:'7px 14px',fontSize:10}} onClick={onDownload}><Download size={12}/> Download Excel</button>
+          </>}
+          <button onClick={onRemove} style={{background:'none',border:`1px solid ${G.border}`,borderRadius:6,padding:'6px 8px',cursor:'pointer',color:G.gray,display:'flex'}}><Trash2 size={13}/></button>
+        </div>
+      </div>
+
+      {file.status==='processing' && <div style={{padding:'0 18px'}}><div className="progress-bar" style={{margin:'10px 0'}}><div className="progress-fill" style={{width:`${file.progress}%`}}/></div></div>}
+
+      {/* Content */}
+      <div style={{display:'grid',gridTemplateColumns:file.extractedData?'180px 1fr':'1fr'}}>
+        {file.preview && (
+          <div style={{background:G.bgCard2,borderRight:`1px solid ${G.border}`,display:'flex',alignItems:'center',justifyContent:'center',minHeight:120,padding:10}}>
+            <img src={file.preview} alt="preview" style={{maxWidth:'100%',maxHeight:160,objectFit:'contain',borderRadius:6}}/>
+          </div>
+        )}
+        {file.status==='completed'&&file.extractedData && (
+          <div style={{overflowX:'auto',maxHeight:280}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead>
+                <tr>
+                  {Object.keys(file.extractedData[0]).map((h,i)=>(
+                    <th key={i} style={{padding:'9px 12px',textAlign:'left',background:G.bgCard2,borderBottom:`1px solid ${G.border}`,position:'sticky',top:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <input type="checkbox" checked={selCols.includes(h)} onChange={()=>toggleCol(h)} style={{width:11,height:11,accentColor:G.gold,cursor:'pointer'}}/>
+                        {editH===h ? (
+                          <div style={{display:'flex',alignItems:'center',gap:4}}>
+                            <input autoFocus value={draft} onChange={e=>setDraft(e.target.value)}
+                              onKeyDown={e=>{if(e.key==='Enter')rename(h);if(e.key==='Escape')setEditH(null);}}
+                              style={{background:G.bgCard,border:`1px solid ${G.gold}66`,borderRadius:4,padding:'2px 6px',color:G.white,fontSize:11,outline:'none',width:90}}/>
+                            <button onClick={()=>rename(h)} style={{background:'none',border:'none',cursor:'pointer',color:G.success}}><CheckCircle2 size={11}/></button>
+                            <button onClick={()=>setEditH(null)} style={{background:'none',border:'none',cursor:'pointer',color:G.error}}><X size={11}/></button>
+                          </div>
+                        ) : (
+                          <div style={{display:'flex',alignItems:'center',gap:4}}>
+                            <span className="fm" style={{fontSize:9,color:G.gold,letterSpacing:'0.08em',textTransform:'uppercase'}}>{h}</span>
+                            <button onClick={()=>{setEditH(h);setDraft(h);}} style={{background:'none',border:'none',cursor:'pointer',color:G.grayDim,padding:1}}><Edit2 size={9}/></button>
+                          </div>
+                        )}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {file.extractedData.map((row,i)=>(
+                  <tr key={i} className="tr-row" style={{borderBottom:`1px solid ${G.border}`}}>
+                    {Object.keys(row).map((h,j)=>(
+                      <td key={j} style={{padding:'8px 12px',color:G.gray,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{row[h]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {file.status==='error' && (
+          <div style={{padding:20,display:'flex',alignItems:'center',gap:12,background:`${G.error}08`}}>
+            <AlertCircle size={16} color={G.error}/>
+            <div><div style={{fontSize:12,color:G.error,fontWeight:600}}>Extraction failed</div><div style={{fontSize:11,color:G.gray,marginTop:3}}>{file.error}</div></div>
+          </div>
+        )}
+      </div>
+
+      {file.status==='completed'&&file.extractedData && (
+        <div style={{padding:'8px 18px',borderTop:`1px solid ${G.border}`,display:'flex',gap:20,background:G.bgCard2}}>
+          <span className="fm" style={{fontSize:10,color:G.gray}}>{file.extractedData.length} rows</span>
+          <span className="fm" style={{fontSize:10,color:G.gray}}>{Object.keys(file.extractedData[0]).length} columns</span>
+          <span className="fm" style={{fontSize:10,color:G.gold,marginLeft:'auto'}}>✓ Ready</span>
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
+// ─── Convert Page ─────────────────────────────────────────────────────────────
+const Convert = ({files,setFiles,addToast}:{files:FileItem[];setFiles:React.Dispatch<React.SetStateAction<FileItem[]>>;addToast:(t:'success'|'error'|'info',m:string)=>void}) => {
+  const {user} = useAuth();
+  const [drag, setDrag] = useState(false);
+
+  const process = async (item:FileItem) => {
+    setFiles(p=>p.map(f=>f.id===item.id?{...f,status:'processing',progress:25,statusMessage:'Sending to Gemini…'}:f));
+    try {
+      const b64 = await new Promise<string>(res=>{ const r=new FileReader(); r.onload=e=>res((e.target?.result as string).split(',')[1]); r.readAsDataURL(item.file); });
+      setFiles(p=>p.map(f=>f.id===item.id?{...f,progress:60,statusMessage:'Extracting data…'}:f));
+      const resp = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64Image: b64, mimeType: item.file.type }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Extraction failed');
+      const data = result.data;
+      setFiles(p=>p.map(f=>f.id===item.id?{...f,status:'completed',progress:100,statusMessage:'Done',extractedData:data}:f));
+      if (user) {
+        await addDoc(collection(db,'history'),{fileName:item.file.name,timestamp:serverTimestamp(),extractedData:data,rowCount:data.length,userId:user.uid});
+        const ref=doc(db,'users',user.uid); const snap=await getDoc(ref);
+        if(snap.exists()) await setDoc(ref,{totalConversions:(snap.data().totalConversions||0)+1},{merge:true});
+      }
+      addToast('success',`${item.file.name} extracted!`);
+    } catch(e:any) {
+      setFiles(p=>p.map(f=>f.id===item.id?{...f,status:'error',error:e.message,statusMessage:'Failed'}:f));
+      addToast('error',`Failed: ${e.message}`);
+    }
+  };
+
+  const handleFiles = (fs:File[]) => {
+    const items:FileItem[] = fs.map(f=>({id:Math.random().toString(36).substr(2,9),file:f,preview:URL.createObjectURL(f),status:'pending',progress:0,statusMessage:'Queued',extractedData:null}));
+    setFiles(p=>[...items,...p]);
+    items.forEach(process);
+  };
+
+  const dl = (f:FileItem) => {
+    if(!f.extractedData) return;
+    const ws=XLSX.utils.json_to_sheet(f.extractedData);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Data');
+    XLSX.writeFile(wb,`${f.file.name.replace(/\.[^.]+$/,'')}_export.xlsx`);
+  };
+
+  return (
+    <div style={{maxWidth:1000,margin:'0 auto',padding:'80px 24px 60px'}}>
+      <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:32,flexWrap:'wrap',gap:16}}>
+        <div><p className="sl" style={{marginBottom:8}}>Convert</p><h2 className="fd" style={{fontSize:34,fontWeight:700,color:G.white}}>Image to Excel</h2></div>
+        <div style={{display:'flex',gap:10}}>
+          <label className="btn-ghost" style={{padding:'10px 16px',cursor:'pointer'}}><Plus size={13}/> Add Files<input type="file" multiple accept="image/*" style={{display:'none'}} onChange={e=>e.target.files&&handleFiles(Array.from(e.target.files))}/></label>
+          {files.length>0&&<button className="btn-ghost" style={{padding:'10px 16px',color:G.error,borderColor:`${G.error}44`}} onClick={()=>setFiles([])}><Trash2 size={13}/> Clear All</button>}
+        </div>
+      </div>
+
+      {files.length===0 ? (
+        <div className={`drop-zone${drag?' over':''}`} style={{minHeight:240}}
+          onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
+          onDrop={e=>{e.preventDefault();setDrag(false);handleFiles(Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')));}}
+          onClick={()=>document.getElementById('fi-main')?.click()}>
+          <div style={{width:48,height:48,borderRadius:10,background:`${G.gold}15`,border:`1px solid ${G.gold}33`,display:'flex',alignItems:'center',justifyContent:'center'}}><Upload size={20} color={G.gold}/></div>
+          <div><p style={{fontSize:14,fontWeight:600,color:G.white,marginBottom:6}}>Drop files or click to upload</p><p style={{fontSize:12,color:G.gray}}>PNG, JPEG, PDF · max 20 MB</p></div>
+          <input id="fi-main" type="file" multiple accept="image/*" style={{display:'none'}} onChange={e=>e.target.files&&handleFiles(Array.from(e.target.files))}/>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          {files.map(f=><FileCard key={f.id} file={f} onRemove={()=>setFiles(p=>p.filter(x=>x.id!==f.id))} onDownload={()=>dl(f)} onUpdate={u=>setFiles(p=>p.map(x=>x.id===u.id?u:x))}/>)}
+          <div className={`drop-zone${drag?' over':''}`} style={{minHeight:70,padding:20,flexDirection:'row',gap:10}}
+            onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
+            onDrop={e=>{e.preventDefault();setDrag(false);handleFiles(Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')));}}
+            onClick={()=>document.getElementById('fi-more')?.click()}>
+            <Plus size={14} color={G.grayDim}/><span style={{fontSize:12,color:G.grayDim}}>Add more files</span>
+            <input id="fi-more" type="file" multiple accept="image/*" style={{display:'none'}} onChange={e=>e.target.files&&handleFiles(Array.from(e.target.files))}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── History Page ─────────────────────────────────────────────────────────────
+const HistoryPage = ({goConvert}:{goConvert:()=>void}) => {
+  const {user}   = useAuth();
+  const [hist,   setHist]   = useState<ConversionHistory[]>([]);
+  const [loading,setLoading]= useState(true);
+
+  const load = async () => {
+    if(!user) return; setLoading(true);
+    try {
+      const q=query(collection(db,'history'),where('userId','==',user.uid),orderBy('timestamp','desc'));
+      const snap=await getDocs(q);
+      setHist(snap.docs.map(d=>({id:d.id,...d.data()} as ConversionHistory)));
+    } catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+
+  useEffect(()=>{load();},[user]);
+
+  const del = async (id:string) => { await deleteDoc(doc(db,'history',id)); setHist(p=>p.filter(h=>h.id!==id)); };
+
+  const dl = (h:ConversionHistory) => {
+    const ws=XLSX.utils.json_to_sheet(h.extractedData);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Data');
+    XLSX.writeFile(wb,`${h.fileName.replace(/\.[^.]+$/,'')}_recovered.xlsx`);
+  };
+
+  return (
+    <div style={{maxWidth:1000,margin:'0 auto',padding:'80px 24px 60px'}}>
+      <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:36,flexWrap:'wrap',gap:16}}>
+        <div><p className="sl" style={{marginBottom:8}}>History</p><h2 className="fd" style={{fontSize:34,fontWeight:700,color:G.white}}>Past Conversions</h2></div>
+        <button className="btn-ghost" style={{padding:'10px 14px'}} onClick={load}><RefreshCw size={13}/> Refresh</button>
+      </div>
+
+      {loading ? (
+        <div style={{display:'flex',justifyContent:'center',padding:80}}><Loader2 size={26} color={G.gold} className="spin"/></div>
+      ) : hist.length===0 ? (
+        <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:56,textAlign:'center'}}>
+          <History size={34} color={G.grayDim} style={{margin:'0 auto 18px'}}/>
+          <h3 style={{fontSize:17,fontWeight:600,color:G.white,marginBottom:8}}>No conversions yet</h3>
+          <p style={{fontSize:13,color:G.gray,marginBottom:24}}>Upload your first image to get started.</p>
+          <button className="btn-gold" style={{padding:'10px 24px'}} onClick={goConvert}><Upload size={13}/> Go to Convert</button>
+        </div>
+      ) : (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:16}}>
+          {hist.map(h=>(
+            <motion.div key={h.id} initial={{opacity:0,scale:.97}} animate={{opacity:1,scale:1}}
+              style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:22,transition:'border-color .2s'}}
+              whileHover={{borderColor:`${G.gold}44`} as any}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:14}}>
+                <div style={{width:38,height:38,borderRadius:8,background:`${G.gold}15`,border:`1px solid ${G.gold}33`,display:'flex',alignItems:'center',justifyContent:'center'}}><FileSpreadsheet size={17} color={G.gold}/></div>
+                <div style={{display:'flex',gap:6}}>
+                  <button onClick={()=>dl(h)} style={{background:'none',border:`1px solid ${G.border}`,borderRadius:6,padding:'5px 7px',cursor:'pointer',color:G.gray,display:'flex'}}><Download size={12}/></button>
+                  <button onClick={()=>del(h.id)} style={{background:'none',border:`1px solid ${G.border}`,borderRadius:6,padding:'5px 7px',cursor:'pointer',color:G.gray,display:'flex'}}><Trash2 size={12}/></button>
                 </div>
-                <h3 style={{ fontFamily: 'Playfair Display', fontSize: 24, color: '#fff', marginBottom: 8 }}>{activeItem.statusMessage}</h3>
-                <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>{activeItem.file.name}</p>
-              </motion.div>
+              </div>
+              <p style={{fontSize:12,fontWeight:600,color:G.white,marginBottom:4,wordBreak:'break-all'}}>{h.fileName}</p>
+              <p className="fm" style={{fontSize:10,color:G.gray,marginBottom:10}}>{h.rowCount} rows extracted</p>
+              <div className="fm" style={{fontSize:9,color:G.grayDim}}>{h.timestamp?.toDate().toLocaleString()}</div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
-            ) : activeItem.status === 'error' ? (
-              <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="panel flex-1 flex flex-col items-center justify-center noise-bg"
-              >
-                <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 20, padding: 32, marginBottom: 24 }}>
-                  <AlertCircle size={40} color="#F87171" />
-                </div>
-                <h3 style={{ fontFamily: 'Playfair Display', fontSize: 24, color: '#fff', marginBottom: 8 }}>Extraction Failed</h3>
-                <p style={{ fontSize: 12, color: '#F87171', marginBottom: 24, maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>{activeItem.error}</p>
-                <button onClick={() => extractSingle(activeItem.id)} className="btn-gold px-8 py-3 rounded-xl">Retry</button>
-              </motion.div>
+// ─── Account Page ─────────────────────────────────────────────────────────────
+const AccountPage = ({addToast}:{addToast:(t:'success'|'error'|'info',m:string)=>void}) => {
+  const {user,profile} = useAuth();
+  const [editN,   setEditN]   = useState(false);
+  const [newName, setNewName] = useState(profile?.displayName||'');
+  const [pwForm,  setPwForm]  = useState(false);
+  const [pw1,     setPw1]     = useState('');
+  const [pw2,     setPw2]     = useState('');
+  const [confirm, setConfirm] = useState(false);
+  const [busy,    setBusy]    = useState(false);
 
-            ) : activeItem.extractedData && (
-              <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="panel flex-1 flex flex-col overflow-hidden noise-bg"
-              >
-                {/* Results Header */}
-                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                  <div className="flex items-center gap-3">
-                    <span className="tag tag-green">Extracted</span>
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'DM Mono', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{activeItem.file.name}</span>
-                    <div className="divider" />
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontFamily: 'DM Mono' }}>{getFilteredData(activeItem.extractedData).length} / {activeItem.extractedData.length} rows · {Object.keys(activeItem.extractedData[0] || {}).length} cols</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {Object.values(filters).some(f => f) && <button onClick={() => setFilters({})} className="btn-ghost px-3 py-1.5 rounded-lg flex items-center gap-1"><Trash2 size={10} /> Clear filters</button>}
-                    <button onClick={() => setIsEditMode(!isEditMode)} style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, padding: '6px 14px', borderRadius: 8, border: '1px solid', transition: 'all 0.15s', cursor: 'pointer', background: isEditMode ? 'var(--gold)' : 'transparent', color: isEditMode ? '#000' : 'rgba(255,255,255,0.4)', borderColor: isEditMode ? 'var(--gold)' : 'var(--border)' }}>
-                      <span className="flex items-center gap-1.5"><Settings2 size={11} />{isEditMode ? 'Editing' : 'Edit'}</span>
-                    </button>
-                  </div>
-                </div>
+  const saveName = async () => {
+    if(!user||!newName.trim()) return;
+    await updateProfile(user,{displayName:newName});
+    await setDoc(doc(db,'users',user.uid),{displayName:newName},{merge:true});
+    setEditN(false); addToast('success','Name updated!');
+  };
 
-                {/* Table */}
-                <div className="flex-1 overflow-auto thin-scroll" style={{ background: '#050508', margin: '12px', borderRadius: 12, border: '1px solid var(--border)' }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 44, textAlign: 'center', borderRight: '1px solid var(--border)' }}>#</th>
-                        {Object.keys(activeItem.extractedData[0] || {}).map(header => (
-                          <th key={header} style={{ minWidth: 160 }}>
-                            {isEditMode ? (
-                              <input type="text" value={header} onChange={e => updateHeader(header, e.target.value)}
-                                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, outline: 'none', width: '100%', fontFamily: 'DM Mono' }} />
-                            ) : (
-                              <div>
-                                <div style={{ marginBottom: 6 }}>{header}</div>
-                                <input type="text" placeholder={`Filter…`} value={filters[header] || ''} onChange={e => handleFilterChange(header, e.target.value)}
-                                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', fontSize: 9, color: '#fff', outline: 'none', fontFamily: 'DM Mono' }} />
-                              </div>
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        const filtered = getFilteredData(activeItem.extractedData);
-                        const start = (currentPage - 1) * rowsPerPage;
-                        return filtered.slice(start, start + rowsPerPage).map((row, i) => (
-                          <tr key={start + i}>
-                            <td style={{ textAlign: 'center', borderRight: '1px solid var(--border)', color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono', fontSize: 10 }}>
-                              {isEditMode ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                  <button onClick={() => deleteRow(start + i)} style={{ color: 'rgba(239,68,68,0.4)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}><X size={10} /></button>
-                                  <button onClick={() => addRow(start + i)} style={{ color: 'rgba(201,168,76,0.4)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}><Plus size={10} /></button>
-                                </div>
-                              ) : start + i + 1}
-                            </td>
-                            {Object.entries(row).map(([key, val]: [string, any], j) => (
-                              <td key={j} style={{ borderRight: '1px solid rgba(255,255,255,0.02)' }}>
-                                {isEditMode ? (
-                                  <textarea value={val !== null && val !== undefined ? String(val) : ''} onChange={e => updateCell(start + i, key, e.target.value)}
-                                    style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.65)', fontSize: 11, outline: 'none', width: '100%', resize: 'none', minHeight: 36, fontFamily: 'DM Sans', padding: 0 }} rows={1} />
-                                ) : val !== null && val !== undefined ? String(val) : <span style={{ color: 'rgba(255,255,255,0.1)' }}>—</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        ));
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
+  const changePw = async () => {
+    if(!user||pw1!==pw2){addToast('error','Passwords do not match.');return;}
+    setBusy(true);
+    try{await updatePassword(user,pw1);addToast('success','Password updated!');setPwForm(false);setPw1('');setPw2('');}
+    catch(e:any){addToast('error',e.message);}
+    finally{setBusy(false);}
+  };
 
-                {/* Pagination */}
-                {getFilteredData(activeItem.extractedData).length > rowsPerPage && (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexShrink: 0 }}>
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} style={{ opacity: currentPage === 1 ? 0.2 : 1, background: 'none', border: 'none', cursor: 'pointer', color: '#fff' }}><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
-                    <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em' }}>Page {currentPage} of {Math.ceil(getFilteredData(activeItem.extractedData).length / rowsPerPage)}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(Math.ceil(getFilteredData(activeItem.extractedData).length / rowsPerPage), p + 1))} disabled={currentPage === Math.ceil(getFilteredData(activeItem.extractedData).length / rowsPerPage)} style={{ opacity: currentPage === Math.ceil(getFilteredData(activeItem.extractedData).length / rowsPerPage) ? 0.2 : 1, background: 'none', border: 'none', cursor: 'pointer', color: '#fff' }}><ChevronRight size={16} /></button>
-                  </div>
-                )}
+  const delAccount = async () => {
+    if(!user) return; setBusy(true);
+    try{await deleteDoc(doc(db,'users',user.uid));await deleteUser(user);}
+    catch(e:any){addToast('error',e.message);}
+    finally{setBusy(false);setConfirm(false);}
+  };
 
-                {/* Action Bar */}
-                <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10, flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
-                  <div className="dl-dropdown" style={{ position: 'relative', flex: 1 }}>
-                    <div style={{ display: 'flex', borderRadius: 10, overflow: 'hidden' }}>
-                      <button onClick={() => downloadExcel(activeItem)} className="btn-gold flex-1 py-3 flex items-center justify-center gap-2" style={{ borderRadius: 0 }}>
-                        <FileSpreadsheet size={13} /> Download .XLSX
-                      </button>
-                      <button onClick={() => setDownloadDropdownOpen(!downloadDropdownOpen)} className="btn-gold py-3 px-3" style={{ borderRadius: 0, borderLeft: '1px solid rgba(0,0,0,0.2)' }}>
-                        <ChevronDown size={13} style={{ transform: downloadDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                      </button>
-                    </div>
-                    <AnimatePresence>
-                      {downloadDropdownOpen && (
-                        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }}
-                          style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: 6, width: '100%', background: '#111118', border: '1px solid var(--border)', borderRadius: 12, padding: 6, zIndex: 100 }}
-                        >
-                          {[{ label: 'Excel (.XLSX)', icon: FileSpreadsheet, fn: () => { downloadExcel(activeItem); setDownloadDropdownOpen(false); } },
-                            { label: 'CSV (.CSV)', icon: FileText, fn: () => { downloadCSV(activeItem); setDownloadDropdownOpen(false); } },
-                            { label: 'JSON (.JSON)', icon: Database, fn: () => { downloadJSON(activeItem); setDownloadDropdownOpen(false); } }
-                          ].map(opt => (
-                            <button key={opt.label} onClick={opt.fn} style={{ width: '100%', textAlign: 'left', padding: '10px 14px', borderRadius: 8, fontSize: 11, color: 'rgba(255,255,255,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', transition: 'all 0.1s' }}
-                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(201,168,76,0.08)'; (e.currentTarget as HTMLElement).style.color = 'var(--gold)'; }}
-                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)'; }}
-                            >
-                              <span style={{ fontWeight: 600, letterSpacing: '0.06em' }}>{opt.label}</span>
-                              <opt.icon size={12} />
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                  <button onClick={() => { setItems(prev => prev.map(i => i.id === activeId ? { ...i, status: 'pending', extractedData: null } : i)); extractSingle(activeItem.id); }}
-                    className="btn-ghost px-4 py-3 rounded-xl flex items-center gap-2">
-                    <RefreshCw size={13} />
-                  </button>
+  return (
+    <div style={{maxWidth:800,margin:'0 auto',padding:'80px 24px 60px'}}>
+      <p className="sl" style={{marginBottom:8}}>Account</p>
+      <h2 className="fd" style={{fontSize:34,fontWeight:700,color:G.white,marginBottom:36}}>Your Profile</h2>
+      <div style={{display:'flex',flexDirection:'column',gap:18}}>
+
+        {/* Profile card */}
+        <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:30}}>
+          <div style={{display:'flex',alignItems:'center',gap:18,marginBottom:28}}>
+            <div style={{width:60,height:60,borderRadius:12,background:`linear-gradient(135deg,${G.goldDark},${G.gold})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,fontWeight:700,color:'#000'}}>{(user?.email||'U')[0].toUpperCase()}</div>
+            <div>
+              <div style={{fontSize:17,fontWeight:600,color:G.white,marginBottom:4}}>{profile?.displayName||'User'}</div>
+              <div style={{fontSize:13,color:G.gray}}>{user?.email}</div>
+              <div className="tag" style={{marginTop:8}}>{profile?.plan==='pro'?'⭐ Pro':'Free Plan'}</div>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:14}}>
+            {[{l:'Conversions',v:profile?.totalConversions||0},{l:'Member Since',v:profile?.createdAt?new Date(profile.createdAt).toLocaleDateString():'—'},{l:'Plan',v:profile?.plan==='pro'?'Pro':'Free'}].map(s=>(
+              <div key={s.l} style={{background:G.bgCard2,border:`1px solid ${G.border}`,borderRadius:8,padding:'14px 18px'}}>
+                <div className="fm" style={{fontSize:9,color:G.grayDim,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8}}>{s.l}</div>
+                <div style={{fontSize:20,fontWeight:700,color:G.gold}}>{s.v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Name */}
+        <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:24}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+            <h3 style={{fontSize:14,fontWeight:600,color:G.white}}>Display Name</h3>
+            {!editN&&<button className="btn-ghost" style={{padding:'5px 12px',fontSize:10}} onClick={()=>{setEditN(true);setNewName(profile?.displayName||'');}}><Edit2 size={11}/> Edit</button>}
+          </div>
+          {editN ? (
+            <div style={{display:'flex',gap:10}}>
+              <input className="input-field" value={newName} onChange={e=>setNewName(e.target.value)} style={{flex:1}}/>
+              <button className="btn-gold" style={{padding:'10px 16px'}} onClick={saveName}><CheckCircle2 size={13}/></button>
+              <button className="btn-ghost" style={{padding:'10px 12px'}} onClick={()=>setEditN(false)}><X size={13}/></button>
+            </div>
+          ) : <p style={{fontSize:13,color:G.gray}}>{profile?.displayName||'—'}</p>}
+        </div>
+
+        {/* Password */}
+        <div style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:12,padding:24}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+            <h3 style={{fontSize:14,fontWeight:600,color:G.white}}>Password</h3>
+            <button className="btn-ghost" style={{padding:'5px 12px',fontSize:10}} onClick={()=>setPwForm(p=>!p)}><Lock size={11}/> {pwForm?'Cancel':'Change'}</button>
+          </div>
+          <AnimatePresence>
+            {pwForm && (
+              <motion.div initial={{height:0,opacity:0}} animate={{height:'auto',opacity:1}} exit={{height:0,opacity:0}} style={{overflow:'hidden'}}>
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  <input className="input-field" type="password" placeholder="New password" value={pw1} onChange={e=>setPw1(e.target.value)}/>
+                  <input className="input-field" type="password" placeholder="Confirm password" value={pw2} onChange={e=>setPw2(e.target.value)}/>
+                  <button className="btn-gold" style={{padding:'10px 20px',alignSelf:'flex-start'}} onClick={changePw} disabled={busy}>{busy?<Loader2 size={13} className="spin"/>:'Update Password'}</button>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-        </section>
+        </div>
 
-        {/* RIGHT PANEL — Chat */}
-        <aside className="hidden xl:flex flex-col overflow-hidden h-full">
-          <div className="panel flex-1 flex flex-col overflow-hidden noise-bg">
-            {/* Chat Header */}
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: 'rgba(255,255,255,0.01)' }}>
-              <div className="flex items-center gap-3">
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--gold)', boxShadow: '0 0 12px var(--gold)' }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', letterSpacing: '0.08em', textTransform: 'uppercase' }}>AI Assistant</span>
-                {activeItem && (
-                  <div style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 6, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--gold)' }} className="animate-pulse" />
-                    <span style={{ fontSize: 8, color: 'var(--gold)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700 }}>Live</span>
-                  </div>
-                )}
+        {/* Danger */}
+        <div style={{background:`${G.error}08`,border:`1px solid ${G.error}22`,borderRadius:12,padding:24}}>
+          <h3 style={{fontSize:13,fontWeight:600,color:G.error,marginBottom:6}}>Danger Zone</h3>
+          <p style={{fontSize:12,color:G.gray,marginBottom:14}}>Permanently delete your account and all data. Cannot be undone.</p>
+          <button className="btn-ghost" style={{padding:'8px 16px',color:G.error,borderColor:`${G.error}44`}} onClick={()=>setConfirm(true)}><Trash2 size={13}/> Delete Account</button>
+        </div>
+      </div>
+
+      {/* Confirm modal */}
+      <AnimatePresence>
+        {confirm && (
+          <motion.div className="modal-bg" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>setConfirm(false)}>
+            <motion.div initial={{scale:.9}} animate={{scale:1}} exit={{scale:.9}} onClick={e=>e.stopPropagation()}
+              style={{background:G.bgCard,border:`1px solid ${G.error}44`,borderRadius:16,padding:36,maxWidth:380,width:'100%'}}>
+              <AlertCircle size={28} color={G.error} style={{marginBottom:14}}/>
+              <h3 style={{fontSize:17,fontWeight:700,color:G.white,marginBottom:10}}>Delete account?</h3>
+              <p style={{fontSize:13,color:G.gray,marginBottom:24,lineHeight:1.6}}>This permanently deletes your account and all history. This cannot be undone.</p>
+              <div style={{display:'flex',gap:10}}>
+                <button className="btn-ghost" style={{flex:1,justifyContent:'center',padding:'11px 0'}} onClick={()=>setConfirm(false)}>Cancel</button>
+                <button className="btn-gold" style={{flex:1,justifyContent:'center',padding:'11px 0',background:G.error,boxShadow:'none'}} onClick={delAccount} disabled={busy}>{busy?<Loader2 size={13} className="spin"/>:'Yes, Delete'}</button>
               </div>
-              {chatMessages.length > 0 && !showClearConfirm && (
-                <div className="flex items-center gap-1">
-                  <button onClick={exportChatHistory} style={{ padding: 6, borderRadius: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', transition: 'color 0.15s' }} onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--gold)'} onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.3)'}><FileDown size={13} /></button>
-                  <button onClick={() => setShowClearConfirm(true)} style={{ padding: 6, borderRadius: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', transition: 'color 0.15s' }} onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = '#F87171'} onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.3)'}><Trash2 size={13} /></button>
-                </div>
-              )}
-              {showClearConfirm && (
-                <div className="flex items-center gap-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: 8, padding: '4px 8px' }}>
-                  <span style={{ fontSize: 9, color: '#F87171', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Clear?</span>
-                  <button onClick={clearChatHistory} style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: '#EF4444', border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>Yes</button>
-                  <button onClick={() => setShowClearConfirm(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)' }}><X size={11} /></button>
-                </div>
-              )}
-            </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
+// ─── Auth Modal ───────────────────────────────────────────────────────────────
+const AuthModal = ({open,onClose,onSuccess}:{open:boolean;onClose:()=>void;onSuccess:()=>void}) => {
+  const [mode,  setMode]  = useState<'login'|'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [pw,    setPw]    = useState('');
+  const [name,  setName]  = useState('');
+  const [busy,  setBusy]  = useState(false);
+  const [err,   setErr]   = useState<string|null>(null);
+  const [showPw,setShowPw]= useState(false);
+
+  const submit = async (e:React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr(null);
+    try {
+      if(mode==='signup'){const c=await createUserWithEmailAndPassword(auth,email,pw);await updateProfile(c.user,{displayName:name});}
+      else await signInWithEmailAndPassword(auth,email,pw);
+      onClose(); onSuccess();
+    } catch(e:any){setErr(e.message);}
+    finally{setBusy(false);}
+  };
+
+  const google = async () => {
+    try{await signInWithPopup(auth,new GoogleAuthProvider());onClose();onSuccess();}
+    catch(e:any){setErr(e.message);}
+  };
+
+  if(!open) return null;
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <motion.div initial={{opacity:0,scale:.95,y:20}} animate={{opacity:1,scale:1,y:0}} onClick={e=>e.stopPropagation()}
+        style={{background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:16,padding:36,width:'100%',maxWidth:400,position:'relative'}}>
+        <button onClick={onClose} style={{position:'absolute',top:14,right:14,background:'none',border:'none',cursor:'pointer',color:G.gray}}><X size={16}/></button>
+
+        <div style={{textAlign:'center',marginBottom:28}}>
+          <Logo/><br/>
+          <h2 style={{fontSize:18,fontWeight:700,color:G.white,marginTop:16}}>{mode==='login'?'Welcome back':'Create account'}</h2>
+          <p style={{fontSize:12,color:G.gray,marginTop:5}}>{mode==='login'?'Sign in to access your history':'Start converting images to Excel'}</p>
+        </div>
+
+        {err && <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 14px',background:`${G.error}12`,border:`1px solid ${G.error}33`,borderRadius:8,marginBottom:16}}><AlertCircle size={13} color={G.error}/><span style={{fontSize:12,color:G.error}}>{err}</span></div>}
+
+        <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:12}}>
+          {mode==='signup' && <input className="input-field" required value={name} onChange={e=>setName(e.target.value)} placeholder="Full name"/>}
+          <input className="input-field" type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address"/>
+          <div style={{position:'relative'}}>
+            <input className="input-field" type={showPw?'text':'password'} required value={pw} onChange={e=>setPw(e.target.value)} placeholder="Password" style={{paddingRight:40}}/>
+            <button type="button" onClick={()=>setShowPw(p=>!p)} style={{position:'absolute',right:12,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:G.gray}}>
+              {showPw?<EyeOff size={14}/>:<Eye size={14}/>}
+            </button>
+          </div>
+          <button className="btn-gold" style={{padding:'12px 0',justifyContent:'center',marginTop:4}} disabled={busy} type="submit">
+            {busy?<Loader2 size={14} className="spin"/>:(mode==='login'?'Sign In':'Create Account')}
+          </button>
+        </form>
+
+        <div style={{display:'flex',alignItems:'center',gap:10,margin:'20px 0'}}>
+          <div style={{flex:1,height:1,background:G.border}}/><span style={{fontSize:11,color:G.grayDim}}>or</span><div style={{flex:1,height:1,background:G.border}}/>
+        </div>
+
+        <button className="btn-ghost" style={{width:'100%',justifyContent:'center',padding:'11px 0'}} onClick={google}>
+          <svg width="14" height="14" viewBox="0 0 24 24"><path fill={G.gray} d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill={G.gray} d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill={G.gray} d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill={G.gray} d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Continue with Google
+        </button>
+
+        <button onClick={()=>setMode(m=>m==='login'?'signup':'login')} style={{display:'block',width:'100%',textAlign:'center',marginTop:18,background:'none',border:'none',cursor:'pointer',fontSize:12,color:G.gold}}>
+          {mode==='login'?"Don't have an account? Sign up":'Already have an account? Sign in'}
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
+// ─── Chatbot ──────────────────────────────────────────────────────────────────
+const Chatbot = () => {
+  const [open,  setOpen]  = useState(false);
+  const [msgs,  setMsgs]  = useState<ChatMsg[]>([{role:'model',content:"Hi! I'm the Img2XL assistant. How can I help?",ts:Date.now()}]);
+  const [input, setInput] = useState('');
+  const [busy,  setBusy]  = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{ if(ref.current) ref.current.scrollTop=ref.current.scrollHeight; },[msgs,busy]);
+
+  const quick = ['How do I upload an image?','What formats are supported?','How to download Excel?'];
+
+  const send = async (text:string) => {
+    if(!text.trim()||busy) return;
+    const um:ChatMsg={role:'user',content:text,ts:Date.now()};
+    setMsgs(p=>[...p,um]); setInput(''); setBusy(true);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [...msgs, um].map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.content })),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Chat failed');
+      setMsgs(p=>[...p,{role:'model',content:json.content||'Sorry, no response.',ts:Date.now()}]);
+    } catch(e:any) { setMsgs(p=>[...p,{role:'model',content:`Error: ${e.message}`,ts:Date.now()}]); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{position:'fixed',bottom:24,right:24,zIndex:150,display:'flex',flexDirection:'column',alignItems:'flex-end',gap:12}}>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{opacity:0,scale:.9,y:16}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:.9,y:16}}
+            style={{width:340,background:G.bgCard,border:`1px solid ${G.border}`,borderRadius:16,overflow:'hidden',boxShadow:`0 24px 64px rgba(0,0,0,.6)`}}>
+            {/* Header */}
+            <div style={{padding:'12px 16px',borderBottom:`1px solid ${G.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',background:G.bgCard2}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{width:26,height:26,borderRadius:7,background:`linear-gradient(135deg,${G.goldDark},${G.gold})`,display:'flex',alignItems:'center',justifyContent:'center'}}><Sparkles size={12} color="#000"/></div>
+                <div><div style={{fontSize:12,fontWeight:700,color:G.white}}>AI Assistant</div><div className="fm" style={{fontSize:9,color:G.gold}}>IMG2XL</div></div>
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <button onClick={()=>setMsgs([{role:'model',content:'Chat cleared. How can I help?',ts:Date.now()}])} style={{background:'none',border:'none',cursor:'pointer',color:G.gray,padding:3}}><RefreshCw size={12}/></button>
+                <button onClick={()=>setOpen(false)} style={{background:'none',border:'none',cursor:'pointer',color:G.gray,padding:3}}><X size={13}/></button>
+              </div>
+            </div>
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto thin-scroll" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {chatMessages.length === 0 && (
-                <div style={{ textAlign: 'center', marginTop: 48 }}>
-                  <Sparkles size={28} color="var(--gold)" style={{ margin: '0 auto 12px', opacity: 0.4 }} />
-                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em', lineHeight: 1.6, maxWidth: 200, margin: '0 auto' }}>
-                    Ask me to analyse your extracted data
-                  </p>
-                  <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {['Summarise the data', 'Find the highest value', 'Count unique entries'].map(s => (
-                      <button key={s} onClick={() => { setChatInput(s); }} style={{ fontSize: 10, color: 'var(--gold)', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}
-                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(201,168,76,0.1)'}
-                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'rgba(201,168,76,0.06)'}
-                      >{s}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                  <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
-                    {msg.role === 'assistant' && <div style={{ fontSize: 8, color: 'var(--gold)', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}><Cpu size={9} /> Img2XL AI</div>}
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', lineHeight: 1.65, fontWeight: 400 }}>
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.15)', marginTop: 4, fontFamily: 'DM Mono' }}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <div ref={ref} style={{height:300,overflowY:'auto',padding:14,display:'flex',flexDirection:'column',gap:10}}>
+              {msgs.map((m,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                  <div className={m.role==='user'?'chat-user':'chat-bot'} style={{maxWidth:'85%',padding:'9px 12px',fontSize:12,lineHeight:1.6,color:G.white}}>{m.content}</div>
                 </div>
               ))}
-              {isChatLoading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 16px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '12px 12px 12px 2px', alignSelf: 'flex-start' }}>
-                  {[0, 1, 2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--gold)', opacity: 0.7 }} className="animate-bounce" />)}
-                </div>
-              )}
-              <div ref={chatScrollRef} />
+              {busy && <div style={{display:'flex',gap:4,padding:'9px 12px'}}>{[0,1,2].map(i=><div key={i} style={{width:5,height:5,borderRadius:'50%',background:G.gold,animation:`pulse-dot 1s ${i*.2}s infinite`}}/>)}</div>}
             </div>
-
+            {/* Quick replies */}
+            <div style={{padding:'0 10px 8px',display:'flex',flexWrap:'wrap',gap:5}}>
+              {quick.map(q=><button key={q} onClick={()=>send(q)} style={{background:`${G.gold}10`,border:`1px solid ${G.gold}33`,borderRadius:5,padding:'4px 8px',fontSize:9,color:G.gold,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}}>{q}</button>)}
+            </div>
             {/* Input */}
-            <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
-              <form onSubmit={e => { e.preventDefault(); handleSendMessage(); }} style={{ display: 'flex', gap: 8 }}>
-                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder={activeItem?.extractedData ? `Ask about ${activeItem.file.name}…` : 'Upload a file to get started…'}
-                  style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 12, padding: '10px 16px', fontSize: 12, color: '#fff', outline: 'none', fontFamily: 'DM Sans', transition: 'border-color 0.15s' }}
-                  onFocus={e => (e.target as HTMLElement).style.borderColor = 'rgba(201,168,76,0.4)'}
-                  onBlur={e => (e.target as HTMLElement).style.borderColor = 'var(--border)'}
-                />
-                <button type="submit" disabled={isChatLoading} className="btn-gold px-4 py-2 rounded-xl" style={{ opacity: isChatLoading ? 0.5 : 1, cursor: isChatLoading ? 'not-allowed' : 'pointer' }}>
-                  <ArrowRight size={16} />
-                </button>
-              </form>
+            <div style={{padding:'8px 10px',borderTop:`1px solid ${G.border}`,display:'flex',gap:7}}>
+              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send(input)} className="input-field" placeholder="Ask anything…" style={{flex:1,padding:'8px 12px',fontSize:12}}/>
+              <button className="btn-gold" style={{padding:'8px 12px',flexShrink:0}} onClick={()=>send(input)}><Send size={12}/></button>
             </div>
-          </div>
-        </aside>
-      </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Footer */}
-      <footer style={{ borderTop: '1px solid var(--border)', padding: '14px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(20px)', flexShrink: 0 }}>
-        <div className="flex items-center gap-6" style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono', letterSpacing: '0.08em' }}>
-          <span>© {new Date().getFullYear()} IMG2XL</span>
-          <span style={{ color: 'var(--gold-dim)', fontWeight: 700 }}>HIMESH & TIRU</span>
-        </div>
-        <div className="flex items-center gap-4" style={{ fontSize: 9, color: 'rgba(255,255,255,0.15)', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'DM Mono' }}>
-          <div className="flex items-center gap-1.5"><Package size={11} /> Batch enabled</div>
-          <div className="flex items-center gap-1.5"><ShieldCheck size={11} /> Stateless mode</div>
-        </div>
-      </footer>
+      <button className="btn-gold" onClick={()=>setOpen(p=>!p)}
+        style={{width:50,height:50,borderRadius:'50%',padding:0,justifyContent:'center',fontSize:0}}>
+        <AnimatePresence mode="wait">
+          {open
+            ? <motion.div key="x"  initial={{scale:0,rotate:-90}} animate={{scale:1,rotate:0}} exit={{scale:0}}><X size={19} color="#000"/></motion.div>
+            : <motion.div key="ch" initial={{scale:0,rotate:90}}  animate={{scale:1,rotate:0}} exit={{scale:0}}><MessageSquare size={19} color="#000"/></motion.div>
+          }
+        </AnimatePresence>
+      </button>
     </div>
+  );
+};
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab,     setTab]     = useState('landing');
+  const [showAuth,setShowAuth]= useState(false);
+  const [files,   setFiles]   = useState<FileItem[]>([]);
+  const [toasts,  setToasts]  = useState<Toast[]>([]);
+
+  const addToast = (type:'success'|'error'|'info', msg:string) => {
+    const id = Math.random().toString(36).substr(2,9);
+    setToasts(p=>[...p,{id,type,msg}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),4000);
+  };
+
+  const logout = async () => {
+    await signOut(auth); setTab('landing'); setFiles([]);
+    addToast('info','Signed out successfully.');
+  };
+
+  const start = () => { if(auth.currentUser) setTab('convert'); else setShowAuth(true); };
+
+  return (
+    <AuthProvider>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{minHeight:'100vh',background:G.bg,color:G.white,overflowX:'hidden'}}>
+        <Navbar tab={tab} setTab={setTab} onLogin={()=>setShowAuth(true)} onLogout={logout}/>
+
+        <AnimatePresence mode="wait">
+          {tab==='landing' && (
+            <motion.div key="land" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:.25}}>
+              <Landing onStart={start}/>
+            </motion.div>
+          )}
+          {tab==='convert' && (
+            <motion.div key="conv" initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0}} transition={{duration:.25}}>
+              <Convert files={files} setFiles={setFiles} addToast={addToast}/>
+            </motion.div>
+          )}
+          {tab==='history' && (
+            <motion.div key="hist" initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0}} transition={{duration:.25}}>
+              <HistoryPage goConvert={()=>setTab('convert')}/>
+            </motion.div>
+          )}
+          {tab==='account' && (
+            <motion.div key="acc" initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0}} transition={{duration:.25}}>
+              <AccountPage addToast={addToast}/>
+            </motion.div>
+          )}
+          {(tab==='about'||tab==='pricing') && (
+            <motion.div key="ap" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:.25}}>
+              <Landing onStart={start}/>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <Chatbot/>
+        <AuthModal open={showAuth} onClose={()=>setShowAuth(false)} onSuccess={()=>setTab('convert')}/>
+        <Toasts items={toasts} dismiss={id=>setToasts(p=>p.filter(t=>t.id!==id))}/>
+      </div>
+    </AuthProvider>
   );
 }
