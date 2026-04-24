@@ -211,11 +211,22 @@ Be concise, friendly, and helpful.`,
     app.use(vite.middlewares);
   } else {
     const dist = path.join(process.cwd(), 'dist');
-    app.get('/robots.txt', (_req, res) => {
-  res.setHeader('Content-Type', 'text/plain');
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain');
   res.send(`User-agent: *
 Allow: /
 Sitemap: https://img2xl-hgtf.onrender.com/sitemap.xml`);
+});
+
+// ✅ sitemap.xml (also important)
+app.get('/sitemap.xml', (_req, res) => {
+  res.type('application/xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://img2xl-hgtf.onrender.com/</loc>
+  </url>
+</urlset>`);
 });
     app.use(express.static(dist));
     app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
