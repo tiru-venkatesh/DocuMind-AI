@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://img2xl-hgtf.onrender.com/sitemap.xml
