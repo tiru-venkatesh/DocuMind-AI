@@ -211,6 +211,12 @@ Be concise, friendly, and helpful.`,
     app.use(vite.middlewares);
   } else {
     const dist = path.join(process.cwd(), 'dist');
+    app.get('/robots.txt', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(`User-agent: *
+Allow: /
+Sitemap: https://img2xl-hgtf.onrender.com/sitemap.xml`);
+});
     app.use(express.static(dist));
     app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
   }
