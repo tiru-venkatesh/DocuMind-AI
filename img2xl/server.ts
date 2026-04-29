@@ -98,8 +98,11 @@ async function ocrScannedPdf(buf: Buffer, ai: OpenAI): Promise<{ rawText: string
       const canvas = createCanvas(viewport.width, viewport.height);
       const ctx = canvas.getContext('2d') as any;
 
-      await page.render({ canvasContext: ctx, viewport }).promise;
-
+await page.render({
+  canvasContext: ctx,
+  viewport,
+  canvas: canvas as any,
+}).promise;
       const imgBase64 = canvas.toBuffer('image/png').toString('base64');
       const pageText = await ocrImageBuffer(imgBase64, 'image/png', 'Page ' + pageNum + ' of ' + totalPages, ai);
 
