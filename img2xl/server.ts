@@ -78,7 +78,7 @@ async function ocrImageBuffer(imgBase64: string, mimeType: string, label: string
 
 // ── render PDF pages to images and OCR each ──────────────────────────────────
 async function ocrScannedPdf(buf: Buffer, ai: OpenAI): Promise<{ rawText: string; tableData: any[]; pages: number }> {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.js');
+  const pdfjsLib = await import('pdfjs-dist');
   const canvasMod = await import('canvas');
   const createCanvas = canvasMod.createCanvas;
 
