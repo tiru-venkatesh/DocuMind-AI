@@ -333,7 +333,21 @@ async function startServer() {
         messages: [
           {
             role: 'system',
-            content: 'You are a smart document assistant. The user uploaded a document. Here is its full content:\n\n---\n' + ctx + '\n---\n\nAnswer questions accurately and helpfully.',
+            content: `You are a Blender Python expert.
+
+Generate ONLY valid bpy code.
+
+Strict rules:
+- No markdown (no \`\`\`)
+- No explanation
+- Blender 5.x API only
+- Do NOT use deprecated features (like mesh.layers)
+- Always clear the scene first
+- Always create at least one visible object
+- Always export the model as output.glb
+
+Example export:
+bpy.ops.export_scene.gltf(filepath="output.glb")`,
           },
           ...(messages || []).map(({ role, content }: any) => ({
             role: role === 'model' ? 'assistant' : role,
